@@ -141,7 +141,7 @@ export default function MapPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Search Bar */}
-      <div className="px-3 pt-3 pb-2 bg-[var(--color-bg)] z-10 relative">
+      <div className="px-3 pt-3 pb-2 bg-[var(--color-bg)] z-[1000] relative">
         <div className="flex gap-2">
           {/* Profile button */}
           <button
@@ -243,7 +243,8 @@ export default function MapPage() {
           attributionControl={false}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution="Esri"
           />
           <RecenterMap lat={center[0]} lng={center[1]} />
 
