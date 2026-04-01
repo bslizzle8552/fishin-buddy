@@ -103,7 +103,36 @@ ALTER TABLE lures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE catches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE skunk_logs ENABLE ROW LEVEL SECURITY;
 
--- Policies: Users can only access their own data
+-- Policies: Drop existing then recreate (safe to re-run)
+DO $$ BEGIN
+  -- Waters
+  DROP POLICY IF EXISTS "Users can view own waters" ON waters;
+  DROP POLICY IF EXISTS "Users can insert own waters" ON waters;
+  DROP POLICY IF EXISTS "Users can update own waters" ON waters;
+  DROP POLICY IF EXISTS "Users can delete own waters" ON waters;
+  -- Spots
+  DROP POLICY IF EXISTS "Users can view own spots" ON spots;
+  DROP POLICY IF EXISTS "Users can insert own spots" ON spots;
+  DROP POLICY IF EXISTS "Users can update own spots" ON spots;
+  DROP POLICY IF EXISTS "Users can delete own spots" ON spots;
+  -- Lures
+  DROP POLICY IF EXISTS "Users can view own lures" ON lures;
+  DROP POLICY IF EXISTS "Users can insert own lures" ON lures;
+  DROP POLICY IF EXISTS "Users can update own lures" ON lures;
+  DROP POLICY IF EXISTS "Users can delete own lures" ON lures;
+  -- Catches
+  DROP POLICY IF EXISTS "Users can view own catches" ON catches;
+  DROP POLICY IF EXISTS "Users can insert own catches" ON catches;
+  DROP POLICY IF EXISTS "Users can update own catches" ON catches;
+  DROP POLICY IF EXISTS "Users can delete own catches" ON catches;
+  -- Skunk logs
+  DROP POLICY IF EXISTS "Users can view own skunk_logs" ON skunk_logs;
+  DROP POLICY IF EXISTS "Users can insert own skunk_logs" ON skunk_logs;
+  DROP POLICY IF EXISTS "Users can update own skunk_logs" ON skunk_logs;
+  DROP POLICY IF EXISTS "Users can delete own skunk_logs" ON skunk_logs;
+END $$;
+
+-- Users can only access their own data
 CREATE POLICY "Users can view own waters" ON waters FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own waters" ON waters FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own waters" ON waters FOR UPDATE USING (auth.uid() = user_id);

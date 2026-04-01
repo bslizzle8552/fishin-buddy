@@ -1,4 +1,18 @@
-import type { Catch, WeatherData } from '../types/database'
+import type { WeatherData } from '../types/database'
+
+interface CatchForRecs {
+  lure_id: string
+  lure_name: string
+  lure_photo_url: string
+  quantity: number
+  temperature_f: number | null
+  cloud_cover: string | null
+  wind_speed_mph: number | null
+  wind_direction: string | null
+  barometric_pressure: number | null
+  precipitation: string | null
+  caught_at: string
+}
 
 interface Recommendation {
   lure_name: string
@@ -12,7 +26,7 @@ interface Recommendation {
 const MIN_CATCHES_FOR_RECS = 5
 
 export function getRecommendations(
-  catches: (Catch & { lure_name: string; lure_photo_url: string })[],
+  catches: CatchForRecs[],
   currentWeather: WeatherData
 ): Recommendation[] | null {
   if (catches.length < MIN_CATCHES_FOR_RECS) return null
@@ -61,7 +75,7 @@ export function getRecommendations(
   }))
 }
 
-function isWeatherSimilar(c: Catch, current: WeatherData): boolean {
+function isWeatherSimilar(c: CatchForRecs, current: WeatherData): boolean {
   let score = 0
   let checks = 0
 
@@ -93,7 +107,7 @@ function isWeatherSimilar(c: Catch, current: WeatherData): boolean {
   return checks >= 2 && score / checks >= 0.5
 }
 
-function buildConditionsSummary(c: Catch): string {
+function buildConditionsSummary(c: CatchForRecs): string {
   const parts: string[] = []
   if (c.temperature_f) parts.push(`${c.temperature_f}°F`)
   if (c.cloud_cover) parts.push(c.cloud_cover.toLowerCase())

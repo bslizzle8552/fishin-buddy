@@ -4,7 +4,7 @@ import L from 'leaflet'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { getCurrentPosition } from '../lib/geo'
-import type { Water, Spot, Catch } from '../types/database'
+import type { Water, Spot } from '../types/database'
 import { useNavigate } from 'react-router-dom'
 import { getDataProgress } from '../lib/recommendations'
 

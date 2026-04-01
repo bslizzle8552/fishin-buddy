@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
-import type { Database } from '../types/database'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+// Untyped client — we use our own interfaces for app-level typing
+// This avoids strict generated-type mismatches with Supabase query shapes
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
