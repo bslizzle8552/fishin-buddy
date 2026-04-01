@@ -31,7 +31,7 @@ function RecenterMap({ lat, lng }: { lat: number; lng: number }) {
 }
 
 export default function MapPage() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const [waters, setWaters] = useState<Water[]>([])
   const [selectedWater, setSelectedWater] = useState<Water | null>(null)
@@ -41,6 +41,7 @@ export default function MapPage() {
   const [search, setSearch] = useState('')
   const [showAddWater, setShowAddWater] = useState(false)
   const [showAddSpot, setShowAddSpot] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [newName, setNewName] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -142,6 +143,32 @@ export default function MapPage() {
       {/* Search Bar */}
       <div className="px-3 pt-3 pb-2 bg-[var(--color-bg)] z-10 relative">
         <div className="flex gap-2">
+          {/* Profile button */}
+          <button
+            onClick={() => setShowProfile(!showProfile)}
+            className="w-10 h-10 rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden"
+          >
+            {user?.user_metadata?.avatar_url ? (
+              <img src={user.user_metadata.avatar_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <svg className="w-5 h-5 text-[var(--color-text-muted)]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0" />
+              </svg>
+            )}
+          </button>
+          {showProfile && (
+            <div className="absolute top-14 left-3 bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] shadow-xl z-30 p-1 min-w-[160px]">
+              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
+                {user?.email || 'Signed in'}
+              </div>
+              <button
+                onClick={() => { setShowProfile(false); signOut() }}
+                className="w-full text-left px-3 py-2.5 text-sm text-[var(--color-danger)] rounded-lg hover:bg-[var(--color-bg-input)]"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
           <div className="flex-1 relative">
             <input
               type="text"
