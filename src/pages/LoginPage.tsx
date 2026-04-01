@@ -4,11 +4,8 @@ export default function LoginPage() {
   const { signInWithGoogle } = useAuth()
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 bg-[var(--color-bg)]">
-      <div className="text-6xl mb-4">🎣</div>
-      <h1 className="text-3xl font-bold text-[var(--color-text)] mb-2">
-        Fishin' Buddy
-      </h1>
+    <div className="flex flex-col items-center justify-center h-full px-6 bg-black">
+      <img src="/logo.png" alt="Fishin' Buddy" className="w-72 mb-6" />
       <p className="text-[var(--color-text-muted)] text-center mb-8 max-w-[280px]">
         Your personal fishing intelligence. Log catches, map spots, track what works.
       </p>
