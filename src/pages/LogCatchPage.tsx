@@ -138,13 +138,24 @@ export default function LogCatchPage() {
     if (!user) return
     setSaveError(null)
 
+    // Debug: log current state
+    console.log('SAVE STATE:', {
+      selectedLureId,
+      selectedLureName,
+      newLureFile: !!newLureFile,
+      newLureName,
+      selectedSpot: selectedSpot?.id,
+      selectedWater: selectedWater?.id,
+      species,
+    })
+
     // Validate
     if (!selectedLureId && !(newLureFile && newLureName.trim())) {
-      setSaveError('No lure selected. Go back and pick one.')
+      setSaveError(`No lure selected (lureId: ${selectedLureId}, newFile: ${!!newLureFile}, newName: "${newLureName}"). Go back and pick one.`)
       return
     }
     if (!selectedSpot || !selectedWater) {
-      setSaveError('No spot selected. Go back and pick one.')
+      setSaveError(`No spot selected (spot: ${selectedSpot?.id}, water: ${selectedWater?.id}). Go back and pick one.`)
       return
     }
 
@@ -458,7 +469,7 @@ export default function LogCatchPage() {
 
 // ============ SPOT PICKER WITH INLINE MAP ============
 
-function MapPinPicker({ center, onPinChange }: { center: [number, number]; onPinChange: (lat: number, lng: number) => void }) {
+function MapPinPicker({ center, onPinChange, tall }: { center: [number, number]; onPinChange: (lat: number, lng: number) => void; tall?: boolean }) {
   function DragHandler() {
     const map = useMap()
     useMapEvents({
@@ -471,7 +482,7 @@ function MapPinPicker({ center, onPinChange }: { center: [number, number]; onPin
   }
 
   return (
-    <div className="relative rounded-xl overflow-hidden h-40 mb-3 border border-[var(--color-border)]">
+    <div className={`relative rounded-xl overflow-hidden border border-[var(--color-border)] ${tall ? 'h-full' : 'h-40 mb-3'}`}>
       <MapContainer center={center} zoom={16} className="h-full w-full" zoomControl={false} attributionControl={false}>
         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
         <DragHandler />
@@ -501,7 +512,8 @@ function SpotPicker({
   gpsCoords: { lat: number; lon: number } | null; userId: string;
   onSelect: (spot: Spot, water: Water) => void; onCreated: () => Promise<void>; onContinue: () => void;
 }) {
-  const [mode, setMode] = useState<'pick' | 'new-water' | 'new-spot'>('pick')
+  // Modes: pick, water-pin, water-name, spot-pin, spot-name
+  const [mode, setMode] = useState<'pick' | 'water-pin' | 'water-name' | 'spot-pin' | 'spot-name'>('pick')
   const [newWaterName, setNewWaterName] = useState('')
   const [newSpotName, setNewSpotName] = useState('')
   const [pickWaterForSpot, setPickWaterForSpot] = useState<Water | null>(null)
@@ -521,7 +533,7 @@ function SpotPicker({
       await onCreated()
       setPickWaterForSpot(data)
       setNewWaterName('')
-      setMode('new-spot')
+      setMode('spot-pin') // go straight to pinning a spot
     }
     setSaving(false)
   }
@@ -542,42 +554,82 @@ function SpotPicker({
     setSaving(false)
   }
 
-  if (mode === 'new-water') {
+  // Step 1 of new water: JUST the map, pick location
+  if (mode === 'water-pin') {
     return (
       <div className="flex-1 flex flex-col">
-        <h3 className="text-lg font-semibold mb-1">New Water</h3>
-        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map to place the pin on the water.</p>
-        <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} />
-        <input type="text" placeholder="Name this water (e.g. Caesar Creek)" value={newWaterName}
+        <h3 className="text-lg font-semibold mb-1">Pin the Water</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map so the pin is on the body of water.</p>
+        <div className="flex-1 min-h-0">
+          <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} tall />
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={() => setMode('water-name')}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium">Pin It Here</button>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 2 of new water: name it
+  if (mode === 'water-name') {
+    return (
+      <div className="flex-1 flex flex-col">
+        <h3 className="text-lg font-semibold mb-1">Name This Water</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-3">What do you call it?</p>
+        <input type="text" placeholder="e.g. Caesar Creek, Steve's Work Pond" value={newWaterName}
           onChange={e => setNewWaterName(e.target.value)} autoFocus
           className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
-          <button onClick={() => setMode('pick')}
-            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={() => setMode('water-pin')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Back</button>
           <button onClick={createWater} disabled={!newWaterName.trim() || saving}
             className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40">
-            {saving ? 'Creating...' : 'Next: Add Spot'}
+            {saving ? 'Creating...' : 'Create & Add Spot'}
           </button>
         </div>
       </div>
     )
   }
 
-  if (mode === 'new-spot') {
+  // Step 1 of new spot: JUST the map
+  if (mode === 'spot-pin') {
     return (
       <div className="flex-1 flex flex-col">
-        <h3 className="text-lg font-semibold mb-1">New Spot</h3>
+        <h3 className="text-lg font-semibold mb-1">Pin Your Spot</h3>
         <p className="text-sm text-[var(--color-text-muted)] mb-0.5">
           at <span className="text-[var(--color-text)] font-medium">{pickWaterForSpot?.name}</span>
         </p>
-        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map to pin your exact bank position.</p>
-        <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} />
-        <input type="text" placeholder="Name this spot (e.g. Spillway, Fallen Tree)" value={newSpotName}
+        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map to your exact bank position.</p>
+        <div className="flex-1 min-h-0">
+          <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} tall />
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={() => setMode('spot-name')}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium">Pin It Here</button>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 2 of new spot: name it
+  if (mode === 'spot-name') {
+    return (
+      <div className="flex-1 flex flex-col">
+        <h3 className="text-lg font-semibold mb-1">Name This Spot</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-3">
+          at <span className="text-[var(--color-text)] font-medium">{pickWaterForSpot?.name}</span> — what do you call this spot?
+        </p>
+        <input type="text" placeholder="e.g. Spillway, Dock Corner, Fallen Tree" value={newSpotName}
           onChange={e => setNewSpotName(e.target.value)} autoFocus
           className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
-          <button onClick={() => setMode('pick')}
-            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={() => setMode('spot-pin')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Back</button>
           <button onClick={createSpot} disabled={!newSpotName.trim() || saving}
             className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40">
             {saving ? 'Creating...' : 'Create Spot'}

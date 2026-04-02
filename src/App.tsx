@@ -7,6 +7,7 @@ import LogCatchPage from './pages/LogCatchPage'
 import TimelinePage from './pages/TimelinePage'
 import LuresPage from './pages/LuresPage'
 import SpotDetailPage from './pages/SpotDetailPage'
+import ManagePage from './pages/ManagePage'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -34,6 +35,7 @@ function AppRoutes() {
           <Route path="/log" element={<LogCatchPage />} />
           <Route path="/timeline" element={<TimelinePage />} />
           <Route path="/lures" element={<LuresPage />} />
+          <Route path="/manage" element={<ManagePage />} />
           <Route path="/spot/:spotId" element={<SpotDetailPage />} />
           <Route path="*" element={<Navigate to="/map" replace />} />
         </Routes>
