@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { supabase } from '../lib/supabase'
@@ -102,13 +102,16 @@ export default function MapPage() {
       .order('name')
     if (data) {
       setSpots(data)
-      const counts: Record<string, number> = {}
-      for (const spot of data) {
-        const { count } = await supabase
-          .from('catches')
-          .select('*', { count: 'exact', head: true })
-          .eq('spot_id', spot.id)
-        counts[spot.id] = count || 0
+      const counts: Record<string, number> = Object.fromEntries(data.map(spot => [spot.id, 0]))
+      const spotIds = data.map(spot => spot.id)
+      const { data: catches } = await supabase
+        .from('catches')
+        .select('spot_id')
+        .in('spot_id', spotIds)
+        .eq('user_id', user.id)
+
+      for (const c of catches ?? []) {
+        counts[c.spot_id] = (counts[c.spot_id] ?? 0) + 1
       }
       setSpotCatchCounts(counts)
     }
@@ -227,7 +230,7 @@ export default function MapPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Search Bar — with safe area top padding */}
-      <div className="px-3 pb-2 bg-[var(--color-bg)] z-[1000] relative" style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}>
+      <div className="px-3 pb-2 bg-[var(--color-bg)] z-[1000] relative safe-top-md">
         <div className="flex gap-2">
           {/* Profile button */}
           <button
