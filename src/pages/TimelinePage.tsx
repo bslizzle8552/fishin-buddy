@@ -78,7 +78,7 @@ export default function TimelinePage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-4" style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}>
+    <div className="h-full overflow-y-auto px-3 pb-4 safe-top-md">
       <h1 className="text-xl font-bold mb-4">Timeline</h1>
       {Object.entries(grouped).map(([date, dayCatches]) => (
         <div key={date} className="mb-5">

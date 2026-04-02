@@ -12,6 +12,27 @@
   --color-danger: #d64545;
   --color-warning: #d4a843;
   --color-border: #3a3f52;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-top-fallback: 0px;
+  --safe-area-bottom-fallback: 0px;
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  :root {
+    --safe-area-top: constant(safe-area-inset-top);
+    --safe-area-bottom: constant(safe-area-inset-bottom);
+  }
+}
+
+/* iOS Home Screen fallback: some standalone sessions report 0 safe-area values */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    :root {
+      --safe-area-top-fallback: 48px;
+      --safe-area-bottom-fallback: 8px;
+    }
+  }
 }
 
 * {
@@ -20,12 +41,13 @@
 }
 
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   margin: 0;
   padding: 0;
 }
 
 body {
+  min-height: 100dvh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--color-bg);
   color: var(--color-text);
@@ -70,9 +92,17 @@ input, textarea, select, button {
 
 /* Safe area padding for iOS */
 .safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--safe-area-top);
+}
+
+.safe-top-md {
+  padding-top: max(12px, var(--safe-area-top), var(--safe-area-top-fallback));
+}
+
+.safe-top-lg {
+  padding-top: max(16px, var(--safe-area-top), var(--safe-area-top-fallback));
 }
 
 .safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: max(var(--safe-area-bottom), var(--safe-area-bottom-fallback));
 }

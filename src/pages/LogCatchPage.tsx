@@ -5,12 +5,14 @@ import { capturePhoto, compressAndUpload } from '../lib/photos'
 import { getCurrentPosition, findNearestSpot } from '../lib/geo'
 import { fetchWeather } from '../lib/weather'
 import { SPECIES } from '../lib/species'
+import { useNavigate } from 'react-router-dom'
 import type { Spot, Water, Lure, WeatherData } from '../types/database'
 
 type Step = 'fish-photo' | 'lure' | 'species' | 'spot' | 'notes' | 'saving' | 'done'
 
 export default function LogCatchPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [step, setStep] = useState<Step>('fish-photo')
 
   // Catch data
@@ -46,8 +48,10 @@ export default function LogCatchPage() {
   } | null>(null)
   const [plusOneCount, setPlusOneCount] = useState(0)
   const [showSkunk, setShowSkunk] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const hasAnySpots = spots.length > 0
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (): Promise<{ waters: Water[]; spots: Spot[] } | undefined> => {
     if (!user) return
     const [lureRes, waterRes, spotRes] = await Promise.all([
       supabase.from('lures').select('*').eq('user_id', user.id).order('catch_count', { ascending: false }).limit(20),
@@ -57,7 +61,10 @@ export default function LogCatchPage() {
     if (lureRes.data) setRecentLures(lureRes.data)
     if (waterRes.data) setWaters(waterRes.data)
     if (spotRes.data) setSpots(spotRes.data)
-    return { waters: waterRes.data, spots: spotRes.data }
+    return {
+      waters: waterRes.data ?? [],
+      spots: spotRes.data ?? [],
+    }
   }, [user])
 
   useEffect(() => {
@@ -72,7 +79,7 @@ export default function LogCatchPage() {
           const nearest = findNearestSpot(coords.lat, coords.lon, result.spots)
           if (nearest) {
             setSelectedSpot(nearest)
-            const water = result.waters?.find((w: any) => w.id === nearest.water_id)
+            const water = result.waters.find(w => w.id === nearest.water_id)
             if (water) setSelectedWater(water)
           }
         }
@@ -138,7 +145,8 @@ export default function LogCatchPage() {
   }
 
   const handleSave = async () => {
-    if (!user || !gpsCoords) return
+    if (!user) return
+    setSaveError(null)
     setStep('saving')
 
     try {
@@ -166,17 +174,31 @@ export default function LogCatchPage() {
         }
       }
 
-      if (!lureId || !selectedSpot || !selectedWater) {
-        alert('Missing required info. Please select a lure and spot.')
+      const resolvedSpot = selectedSpot
+      const resolvedWaterId = selectedSpot?.water_id ?? selectedWater?.id ?? null
+
+      if (!lureId) {
+        alert('Missing lure. Please select or create a lure.')
         setStep('lure')
         return
       }
 
+      if (!resolvedSpot || !resolvedWaterId) {
+        alert('Missing spot. Please select a spot.')
+        setStep('spot')
+        return
+      }
+
+      // Prefer live GPS; fall back to selected spot coordinates so save still works
+      const catchCoords = gpsCoords
+        ? { lat: gpsCoords.lat, lon: gpsCoords.lon }
+        : { lat: selectedSpot.latitude, lon: selectedSpot.longitude }
+
       // Create the catch
       const catchData = {
         user_id: user.id,
-        spot_id: selectedSpot.id,
-        water_id: selectedWater.id,
+        spot_id: resolvedSpot.id,
+        water_id: resolvedWaterId,
         lure_id: lureId,
         species: species,
         fish_photo_url: fishPhotoUrl,
@@ -189,8 +211,8 @@ export default function LogCatchPage() {
         wind_direction: weather?.wind_direction ?? null,
         barometric_pressure: weather?.barometric_pressure ?? null,
         precipitation: weather?.precipitation ?? null,
-        latitude: gpsCoords.lat,
-        longitude: gpsCoords.lon,
+        latitude: catchCoords.lat,
+        longitude: catchCoords.lon,
         caught_at: new Date().toISOString(),
       }
 
@@ -201,20 +223,20 @@ export default function LogCatchPage() {
 
       // Store for plus-one
       setLastCatch({
-        spot_id: selectedSpot.id,
-        water_id: selectedWater.id,
+        spot_id: resolvedSpot.id,
+        water_id: resolvedWaterId,
         lure_id: lureId,
         species: species,
         weather: weather,
-        lat: gpsCoords.lat,
-        lon: gpsCoords.lon,
+        lat: catchCoords.lat,
+        lon: catchCoords.lon,
       })
       setPlusOneCount(0)
 
       setStep('done')
     } catch (err) {
       console.error('Save failed:', err)
-      alert('Failed to save catch. Please try again.')
+      setSaveError('Failed to save catch. Please try again.')
       setStep('notes')
     }
   }
@@ -246,11 +268,11 @@ export default function LogCatchPage() {
   }
 
   const handleSkunkLog = async (skunkNotes: string, luresTried: string) => {
-    if (!user || !selectedSpot || !selectedWater || !gpsCoords) return
+    if (!user || !selectedSpot) return
     await supabase.from('skunk_logs').insert({
       user_id: user.id,
       spot_id: selectedSpot.id,
-      water_id: selectedWater.id,
+      water_id: selectedSpot.water_id,
       notes: skunkNotes || null,
       lures_tried: luresTried || null,
       temperature_f: weather?.temperature_f ?? null,
@@ -293,7 +315,7 @@ export default function LogCatchPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-bg)] px-4 pb-4 overflow-y-auto" style={{ paddingTop: 'max(16px, env(safe-area-inset-top, 16px))' }}>
+    <div className="flex flex-col h-full bg-[var(--color-bg)] px-4 pb-4 overflow-y-auto safe-top-lg">
       {/* Weather bar */}
       {weather && weather.temperature_f && (
         <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)] mb-4 bg-[var(--color-bg-card)] rounded-xl px-3 py-2">
@@ -463,7 +485,7 @@ export default function LogCatchPage() {
                     <button
                       key={s.id}
                       type="button"
-                      onPointerDown={() => { setSelectedSpot(s); setSelectedWater(w) }}
+                      onClick={() => { setSelectedSpot(s); setSelectedWater(w) }}
                       className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium mb-1.5 border transition-colors ${
                         selectedSpot?.id === s.id
                           ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-[var(--color-accent)]'
@@ -476,8 +498,19 @@ export default function LogCatchPage() {
                 </div>
               )
             })}
-            {waters.length === 0 && (
-              <p className="text-sm text-[var(--color-text-muted)]">No waters or spots yet. Create some on the Map tab first.</p>
+            {!hasAnySpots && (
+              <div className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl p-3">
+                <p className="text-sm text-[var(--color-text-muted)] mb-2">
+                  You need at least one saved spot before logging a catch.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/map')}
+                  className="text-sm text-[var(--color-accent)] underline"
+                >
+                  Go to Map and add a spot
+                </button>
+              </div>
             )}
           </div>
 
@@ -509,6 +542,9 @@ export default function LogCatchPage() {
             rows={3}
             className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] resize-none mb-4"
           />
+          {saveError && (
+            <div className="text-sm text-[var(--color-danger)] mb-3">{saveError}</div>
+          )}
           <div className="flex gap-2 mt-auto">
             <button
               onClick={() => setStep('spot')}

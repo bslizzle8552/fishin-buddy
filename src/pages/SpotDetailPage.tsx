@@ -25,6 +25,10 @@ interface CatchWithLure {
   lure_photo_url: string
 }
 
+type CatchRow = Omit<CatchWithLure, 'lure_name' | 'lure_photo_url'> & {
+  lure: { name: string; photo_url: string }[] | null
+}
+
 export default function SpotDetailPage() {
   const { spotId } = useParams()
   const { user } = useAuth()
@@ -70,11 +74,14 @@ export default function SpotDetailPage() {
       .order('caught_at', { ascending: false })
 
     if (catchData) {
-      setCatches(catchData.map((c: any) => ({
-        ...c,
-        lure_name: c.lure?.name || 'Unknown',
-        lure_photo_url: c.lure?.photo_url || '',
-      })))
+      setCatches((catchData as unknown as CatchRow[]).map((c) => {
+        const lure = c.lure?.[0]
+        return {
+          ...c,
+          lure_name: lure?.name || 'Unknown',
+          lure_photo_url: lure?.photo_url || '',
+        }
+      }))
     }
 
     // Get current weather for recommendations
@@ -110,7 +117,7 @@ export default function SpotDetailPage() {
   return (
     <div className="h-full overflow-y-auto pb-4">
       {/* Header */}
-      <div className="px-4 pb-3 bg-[var(--color-bg)]" style={{ paddingTop: 'max(16px, env(safe-area-inset-top, 16px))' }}>
+      <div className="px-4 pb-3 bg-[var(--color-bg)] safe-top-lg">
         <div className="flex items-center justify-between mb-2">
           <button
             onClick={() => navigate(-1)}

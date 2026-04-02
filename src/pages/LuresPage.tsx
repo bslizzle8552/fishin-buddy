@@ -44,7 +44,7 @@ export default function LuresPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-4" style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 12px))' }}>
+    <div className="h-full overflow-y-auto px-3 pb-4 safe-top-md">
       <h1 className="text-xl font-bold mb-4">Lure Library</h1>
       <div className="grid grid-cols-2 gap-3">
         {lures.map(lure => (
