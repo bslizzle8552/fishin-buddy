@@ -66,7 +66,7 @@ export default function MapPage() {
   const [spots, setSpots] = useState<Spot[]>([])
   const [spotCatchCounts, setSpotCatchCounts] = useState<Record<string, number>>({})
   const [center, setCenter] = useState<[number, number]>([39.5, -84.3])
-  const [zoom, setZoom] = useState(10)
+  const [zoom, setZoom] = useState(14) // Start at street level — close enough to see where you are
   const [search, setSearch] = useState('')
   const [showAddWater, setShowAddWater] = useState(false)
   const [showAddSpot, setShowAddSpot] = useState(false)
@@ -114,11 +114,25 @@ export default function MapPage() {
     }
   }, [user])
 
-  useEffect(() => {
-    loadWaters()
+  const locateMe = useCallback(() => {
     getCurrentPosition()
       .then(pos => {
         setCenter([pos.coords.latitude, pos.coords.longitude])
+        setZoom(16)
+        setMapCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+      })
+      .catch(() => {
+        alert('Could not get your location. Make sure location services are enabled.')
+      })
+  }, [])
+
+  useEffect(() => {
+    loadWaters()
+    // Center on user's GPS right away
+    getCurrentPosition()
+      .then(pos => {
+        setCenter([pos.coords.latitude, pos.coords.longitude])
+        setZoom(16) // Zoom in close so you can see where you are
         setMapCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude })
       })
       .catch(() => {})
@@ -423,6 +437,19 @@ export default function MapPage() {
             <div className="absolute w-4 h-0.5 bg-red-400 opacity-60" />
           </div>
         )}
+
+        {/* Locate me button */}
+        <button
+          onClick={locateMe}
+          className="absolute bottom-4 right-3 z-[500] w-11 h-11 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+          title="Center on my location"
+        >
+          <svg className="w-5 h-5 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2M3 12h2m14 0h2" />
+          </svg>
+        </button>
       </div>
 
       {/* Add Water Modal */}

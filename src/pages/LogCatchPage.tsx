@@ -138,7 +138,22 @@ export default function LogCatchPage() {
   }
 
   const handleSave = async () => {
-    if (!user || !gpsCoords) return
+    if (!user) return
+
+    // Validate required fields before starting save
+    const lureId = selectedLure?.id
+    const hasNewLure = !lureId && newLureFile && newLureName.trim()
+    if (!lureId && !hasNewLure) {
+      alert('Please select or add a lure.')
+      setStep('lure')
+      return
+    }
+    if (!selectedSpot || !selectedWater) {
+      alert('Please select a spot.')
+      setStep('spot')
+      return
+    }
+
     setStep('saving')
 
     try {
@@ -149,8 +164,8 @@ export default function LogCatchPage() {
       }
 
       // Handle lure - either existing or new
-      let lureId = selectedLure?.id
-      if (!lureId && newLureFile && newLureName.trim()) {
+      let finalLureId = lureId
+      if (!finalLureId && newLureFile && newLureName.trim()) {
         const lurePhotoUrl = await compressAndUpload(newLureFile, 'catch-photos', `lures/${user.id}`)
         if (lurePhotoUrl) {
           const { data: newLure } = await supabase
@@ -162,22 +177,26 @@ export default function LogCatchPage() {
             })
             .select()
             .single()
-          if (newLure) lureId = newLure.id
+          if (newLure) finalLureId = newLure.id
         }
       }
 
-      if (!lureId || !selectedSpot || !selectedWater) {
-        alert('Missing required info. Please select a lure and spot.')
+      if (!finalLureId) {
+        alert('Failed to save lure. Please try again.')
         setStep('lure')
         return
       }
+
+      // Use GPS coords if available, otherwise use the spot's coordinates
+      const lat = gpsCoords?.lat ?? selectedSpot.latitude
+      const lon = gpsCoords?.lon ?? selectedSpot.longitude
 
       // Create the catch
       const catchData = {
         user_id: user.id,
         spot_id: selectedSpot.id,
         water_id: selectedWater.id,
-        lure_id: lureId,
+        lure_id: finalLureId,
         species: species,
         fish_photo_url: fishPhotoUrl,
         quantity: 1,
@@ -189,25 +208,25 @@ export default function LogCatchPage() {
         wind_direction: weather?.wind_direction ?? null,
         barometric_pressure: weather?.barometric_pressure ?? null,
         precipitation: weather?.precipitation ?? null,
-        latitude: gpsCoords.lat,
-        longitude: gpsCoords.lon,
+        latitude: lat,
+        longitude: lon,
         caught_at: new Date().toISOString(),
       }
 
       await supabase.from('catches').insert(catchData)
 
       // Increment lure catch count
-      await supabase.rpc('increment_lure_catch_count', { lure_id_param: lureId })
+      await supabase.rpc('increment_lure_catch_count', { lure_id_param: finalLureId })
 
       // Store for plus-one
       setLastCatch({
         spot_id: selectedSpot.id,
         water_id: selectedWater.id,
-        lure_id: lureId,
+        lure_id: finalLureId,
         species: species,
         weather: weather,
-        lat: gpsCoords.lat,
-        lon: gpsCoords.lon,
+        lat: lat,
+        lon: lon,
       })
       setPlusOneCount(0)
 
