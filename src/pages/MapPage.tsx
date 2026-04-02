@@ -438,19 +438,21 @@ export default function MapPage() {
           </div>
         )}
 
-        {/* Locate me button */}
-        <button
-          onClick={locateMe}
-          className="absolute bottom-4 right-3 z-[500] w-11 h-11 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-          title="Center on my location"
-        >
-          <svg className="w-5 h-5 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2M3 12h2m14 0h2" />
-          </svg>
-        </button>
       </div>
+
+      {/* Locate me button — outside the map container so Leaflet can't cover it */}
+      <button
+        onClick={locateMe}
+        className="fixed bottom-20 right-4 z-[1000] w-12 h-12 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+        style={{ maxWidth: '430px' }}
+        title="Center on my location"
+      >
+        <svg className="w-6 h-6 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2M3 12h2m14 0h2" />
+        </svg>
+      </button>
 
       {/* Add Water Modal */}
       {showAddWater && (
