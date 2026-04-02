@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -12,6 +13,8 @@ type Step = 'fish-photo' | 'lure' | 'species' | 'spot' | 'notes' | 'saving' | 'd
 
 export default function LogCatchPage() {
   const { user } = useAuth()
+  const routeLocation = useLocation()
+  const navState = routeLocation.state as { spotId?: string; waterId?: string } | null
   const [step, setStep] = useState<Step>('fish-photo')
 
   // Catch data — using refs-like pattern to avoid stale closures
@@ -60,11 +63,20 @@ export default function LogCatchPage() {
 
   useEffect(() => {
     loadData().then(async (result) => {
+      // If navigated here with a pre-selected spot, use it
+      if (navState?.spotId && result?.spots && result?.waters) {
+        const preSpot = result.spots.find((s: any) => s.id === navState.spotId)
+        const preWater = result.waters.find((w: any) => w.id === navState.waterId)
+        if (preSpot) setSelectedSpot(preSpot)
+        if (preWater) setSelectedWater(preWater)
+      }
+
       try {
         const pos = await getCurrentPosition()
         const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude }
         setGpsCoords(coords)
-        if (result?.spots) {
+        // Only auto-match if no pre-selected spot
+        if (!navState?.spotId && result?.spots) {
           const nearest = findNearestSpot(coords.lat, coords.lon, result.spots)
           if (nearest) {
             setSelectedSpot(nearest)
@@ -76,7 +88,7 @@ export default function LogCatchPage() {
         setWeather(w)
       } catch { /* GPS not available */ }
     })
-  }, [user, loadData])
+  }, [user, loadData, navState?.spotId, navState?.waterId])
 
   useEffect(() => {
     if (selectedSpot && waters.length > 0 && !selectedWater) {
@@ -162,28 +174,40 @@ export default function LogCatchPage() {
     setStep('saving')
 
     try {
-      // Upload fish photo
+      // Upload fish photo (optional — don't block save if it fails)
       let fishPhotoUrl: string | null = null
       if (fishPhotoFile) {
-        fishPhotoUrl = await compressAndUpload(fishPhotoFile, 'catch-photos', `fish/${user.id}`)
+        const fishResult = await compressAndUpload(fishPhotoFile, 'catch-photos', `fish/${user.id}`)
+        fishPhotoUrl = fishResult.url
+        if (fishResult.error) console.warn('Fish photo upload failed:', fishResult.error)
       }
 
       // Resolve lure ID
       let lureId = selectedLureId
       if (!lureId && newLureFile && newLureName.trim()) {
-        const lurePhotoUrl = await compressAndUpload(newLureFile, 'catch-photos', `lures/${user.id}`)
-        if (lurePhotoUrl) {
-          const { data: createdLure } = await supabase
+        const lureResult = await compressAndUpload(newLureFile, 'catch-photos', `lures/${user.id}`)
+        if (lureResult.url) {
+          const { data: createdLure, error: lureDbError } = await supabase
             .from('lures')
-            .insert({ user_id: user.id, name: newLureName.trim(), photo_url: lurePhotoUrl })
+            .insert({ user_id: user.id, name: newLureName.trim(), photo_url: lureResult.url })
             .select()
             .single()
-          if (createdLure) lureId = createdLure.id
+          if (createdLure) {
+            lureId = createdLure.id
+          } else {
+            setSaveError(`Lure DB error: ${lureDbError?.message || 'unknown'}`)
+            setStep('notes')
+            return
+          }
+        } else {
+          setSaveError(`Lure photo upload failed: ${lureResult.error}. Check that the "catch-photos" storage bucket exists in Supabase and is set to public.`)
+          setStep('notes')
+          return
         }
       }
 
       if (!lureId) {
-        setSaveError('Could not save the lure photo. Try again.')
+        setSaveError(`No lure ID. selectedLureId=${selectedLureId}, hadNewFile=${!!newLureFile}, newName="${newLureName}"`)
         setStep('notes')
         return
       }
@@ -580,7 +604,7 @@ function SpotPicker({
         <h3 className="text-lg font-semibold mb-1">Name This Water</h3>
         <p className="text-sm text-[var(--color-text-muted)] mb-3">What do you call it?</p>
         <input type="text" placeholder="e.g. Caesar Creek, Steve's Work Pond" value={newWaterName}
-          onChange={e => setNewWaterName(e.target.value)} autoFocus
+          onChange={e => setNewWaterName(e.target.value)}
           className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
           <button onClick={() => setMode('water-pin')}
@@ -625,7 +649,7 @@ function SpotPicker({
           at <span className="text-[var(--color-text)] font-medium">{pickWaterForSpot?.name}</span> — what do you call this spot?
         </p>
         <input type="text" placeholder="e.g. Spillway, Dock Corner, Fallen Tree" value={newSpotName}
-          onChange={e => setNewSpotName(e.target.value)} autoFocus
+          onChange={e => setNewSpotName(e.target.value)}
           className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
           <button onClick={() => setMode('spot-pin')}

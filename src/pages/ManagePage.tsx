@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import type { Water, Spot } from '../types/database'
 
 export default function ManagePage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [waters, setWaters] = useState<Water[]>([])
   const [spots, setSpots] = useState<Spot[]>([])
   const [loading, setLoading] = useState(true)
@@ -137,11 +139,15 @@ export default function ManagePage() {
                               <input type="text" value={editingSpot.name}
                                 onChange={e => setEditingSpot({ ...editingSpot, name: e.target.value })}
                                 onBlur={renameSpot} onKeyDown={e => e.key === 'Enter' && renameSpot()}
-                                autoFocus className="bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-lg px-2 py-1 text-sm outline-none border border-[var(--color-accent)]" />
+                                className="bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-lg px-2 py-1 text-sm outline-none border border-[var(--color-accent)]" />
                             ) : (
                               <span className="text-sm text-[var(--color-text)]">📍 {s.name}</span>
                             )}
                           </div>
+                          <button onClick={() => navigate('/log', { state: { spotId: s.id, waterId: w.id } })}
+                            className="px-2 py-1 text-xs bg-[var(--color-accent)] text-white rounded-lg mr-1 font-medium">
+                            🐟 Log
+                          </button>
                           <button onClick={() => setEditingSpot({ id: s.id, name: s.name })}
                             className="p-1.5 text-[var(--color-text-muted)]">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">

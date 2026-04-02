@@ -8,11 +8,16 @@ const COMPRESSION_OPTIONS = {
   useWebWorker: true,
 }
 
+export interface UploadResult {
+  url: string | null
+  error: string | null
+}
+
 export async function compressAndUpload(
   file: File,
   bucket: string,
   folder: string
-): Promise<string | null> {
+): Promise<UploadResult> {
   try {
     const compressed = await imageCompression(file, COMPRESSION_OPTIONS)
     const ext = file.name.split('.').pop() || 'jpg'
@@ -25,13 +30,14 @@ export async function compressAndUpload(
         upsert: false,
       })
 
-    if (error) throw error
+    if (error) {
+      return { url: null, error: `Storage: ${error.message}` }
+    }
 
     const { data } = supabase.storage.from(bucket).getPublicUrl(path)
-    return data.publicUrl
-  } catch (err) {
-    console.error('Photo upload failed:', err)
-    return null
+    return { url: data.publicUrl, error: null }
+  } catch (err: any) {
+    return { url: null, error: err?.message || 'Unknown upload error' }
   }
 }
 
