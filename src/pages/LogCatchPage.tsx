@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
+import L from 'leaflet'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { capturePhoto, compressAndUpload } from '../lib/photos'
@@ -9,14 +11,21 @@ import type { Spot, Water, Lure, WeatherData } from '../types/database'
 
 type Step = 'fish-photo' | 'lure' | 'species' | 'spot' | 'notes' | 'saving' | 'done'
 
+const dropPin = new L.Icon({
+  iconUrl: 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23e85050" width="36" height="36"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>`),
+  iconSize: [36, 36],
+  iconAnchor: [18, 36],
+})
+
 export default function LogCatchPage() {
   const { user } = useAuth()
   const [step, setStep] = useState<Step>('fish-photo')
 
-  // Catch data
+  // Catch data — using refs-like pattern to avoid stale closures
   const [fishPhotoFile, setFishPhotoFile] = useState<File | null>(null)
   const [fishPhotoPreview, setFishPhotoPreview] = useState<string | null>(null)
-  const [selectedLure, setSelectedLure] = useState<Lure | null>(null)
+  const [selectedLureId, setSelectedLureId] = useState<string | null>(null)
+  const [selectedLureName, setSelectedLureName] = useState<string>('')
   const [newLureFile, setNewLureFile] = useState<File | null>(null)
   const [newLurePreview, setNewLurePreview] = useState<string | null>(null)
   const [newLureName, setNewLureName] = useState('')
@@ -36,16 +45,12 @@ export default function LogCatchPage() {
 
   // Plus-one state
   const [lastCatch, setLastCatch] = useState<{
-    spot_id: string
-    water_id: string
-    lure_id: string
-    species: string
-    weather: WeatherData | null
-    lat: number
-    lon: number
+    spot_id: string; water_id: string; lure_id: string; species: string;
+    weather: WeatherData | null; lat: number; lon: number;
   } | null>(null)
   const [plusOneCount, setPlusOneCount] = useState(0)
   const [showSkunk, setShowSkunk] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     if (!user) return
@@ -62,12 +67,10 @@ export default function LogCatchPage() {
 
   useEffect(() => {
     loadData().then(async (result) => {
-      // Get GPS and weather
       try {
         const pos = await getCurrentPosition()
         const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude }
         setGpsCoords(coords)
-        // Auto-match nearest spot
         if (result?.spots) {
           const nearest = findNearestSpot(coords.lat, coords.lon, result.spots)
           if (nearest) {
@@ -76,16 +79,12 @@ export default function LogCatchPage() {
             if (water) setSelectedWater(water)
           }
         }
-        // Fetch weather
         const w = await fetchWeather(coords.lat, coords.lon)
         setWeather(w)
-      } catch {
-        // GPS not available — weather and auto-match won't work
-      }
+      } catch { /* GPS not available */ }
     })
   }, [user, loadData])
 
-  // When waters load and we have a matched spot, set the water
   useEffect(() => {
     if (selectedSpot && waters.length > 0 && !selectedWater) {
       const water = waters.find(w => w.id === selectedSpot.water_id)
@@ -111,12 +110,17 @@ export default function LogCatchPage() {
   }
 
   const handleSelectLure = (lure: Lure) => {
-    setSelectedLure(lure)
+    setSelectedLureId(lure.id)
+    setSelectedLureName(lure.name)
+    setNewLureFile(null)
+    setNewLureName('')
     setStep('species')
   }
 
   const handleConfirmNewLure = () => {
     if (newLureName.trim() && newLureFile) {
+      setSelectedLureId(null) // will create on save
+      setSelectedLureName(newLureName.trim())
       setStep('species')
     }
   }
@@ -139,18 +143,15 @@ export default function LogCatchPage() {
 
   const handleSave = async () => {
     if (!user) return
+    setSaveError(null)
 
-    // Validate required fields before starting save
-    const lureId = selectedLure?.id
-    const hasNewLure = !lureId && newLureFile && newLureName.trim()
-    if (!lureId && !hasNewLure) {
-      alert('Please select or add a lure.')
-      setStep('lure')
+    // Validate
+    if (!selectedLureId && !(newLureFile && newLureName.trim())) {
+      setSaveError('No lure selected. Go back and pick one.')
       return
     }
     if (!selectedSpot || !selectedWater) {
-      alert('Please select a spot.')
-      setStep('spot')
+      setSaveError('No spot selected. Go back and pick one.')
       return
     }
 
@@ -163,41 +164,35 @@ export default function LogCatchPage() {
         fishPhotoUrl = await compressAndUpload(fishPhotoFile, 'catch-photos', `fish/${user.id}`)
       }
 
-      // Handle lure - either existing or new
-      let finalLureId = lureId
-      if (!finalLureId && newLureFile && newLureName.trim()) {
+      // Resolve lure ID
+      let lureId = selectedLureId
+      if (!lureId && newLureFile && newLureName.trim()) {
         const lurePhotoUrl = await compressAndUpload(newLureFile, 'catch-photos', `lures/${user.id}`)
         if (lurePhotoUrl) {
-          const { data: newLure } = await supabase
+          const { data: createdLure } = await supabase
             .from('lures')
-            .insert({
-              user_id: user.id,
-              name: newLureName.trim(),
-              photo_url: lurePhotoUrl,
-            })
+            .insert({ user_id: user.id, name: newLureName.trim(), photo_url: lurePhotoUrl })
             .select()
             .single()
-          if (newLure) finalLureId = newLure.id
+          if (createdLure) lureId = createdLure.id
         }
       }
 
-      if (!finalLureId) {
-        alert('Failed to save lure. Please try again.')
-        setStep('lure')
+      if (!lureId) {
+        setSaveError('Could not save the lure photo. Try again.')
+        setStep('notes')
         return
       }
 
-      // Use GPS coords if available, otherwise use the spot's coordinates
       const lat = gpsCoords?.lat ?? selectedSpot.latitude
       const lon = gpsCoords?.lon ?? selectedSpot.longitude
 
-      // Create the catch
-      const catchData = {
+      await supabase.from('catches').insert({
         user_id: user.id,
         spot_id: selectedSpot.id,
         water_id: selectedWater.id,
-        lure_id: finalLureId,
-        species: species,
+        lure_id: lureId,
+        species,
         fish_photo_url: fishPhotoUrl,
         quantity: 1,
         notes: notes || null,
@@ -211,29 +206,19 @@ export default function LogCatchPage() {
         latitude: lat,
         longitude: lon,
         caught_at: new Date().toISOString(),
-      }
+      })
 
-      await supabase.from('catches').insert(catchData)
+      await supabase.rpc('increment_lure_catch_count', { lure_id_param: lureId })
 
-      // Increment lure catch count
-      await supabase.rpc('increment_lure_catch_count', { lure_id_param: finalLureId })
-
-      // Store for plus-one
       setLastCatch({
-        spot_id: selectedSpot.id,
-        water_id: selectedWater.id,
-        lure_id: finalLureId,
-        species: species,
-        weather: weather,
-        lat: lat,
-        lon: lon,
+        spot_id: selectedSpot.id, water_id: selectedWater.id,
+        lure_id: lureId, species, weather, lat, lon,
       })
       setPlusOneCount(0)
-
       setStep('done')
     } catch (err) {
       console.error('Save failed:', err)
-      alert('Failed to save catch. Please try again.')
+      setSaveError('Save failed. Check your connection and try again.')
       setStep('notes')
     }
   }
@@ -241,23 +226,16 @@ export default function LogCatchPage() {
   const handlePlusOne = async () => {
     if (!lastCatch || !user) return
     await supabase.from('catches').insert({
-      user_id: user.id,
-      spot_id: lastCatch.spot_id,
-      water_id: lastCatch.water_id,
-      lure_id: lastCatch.lure_id,
-      species: lastCatch.species,
-      fish_photo_url: null,
-      quantity: 1,
-      notes: null,
-      size_estimate: null,
+      user_id: user.id, spot_id: lastCatch.spot_id, water_id: lastCatch.water_id,
+      lure_id: lastCatch.lure_id, species: lastCatch.species,
+      fish_photo_url: null, quantity: 1, notes: null, size_estimate: null,
       temperature_f: lastCatch.weather?.temperature_f ?? null,
       cloud_cover: lastCatch.weather?.cloud_cover ?? null,
       wind_speed_mph: lastCatch.weather?.wind_speed_mph ?? null,
       wind_direction: lastCatch.weather?.wind_direction ?? null,
       barometric_pressure: lastCatch.weather?.barometric_pressure ?? null,
       precipitation: lastCatch.weather?.precipitation ?? null,
-      latitude: lastCatch.lat,
-      longitude: lastCatch.lon,
+      latitude: lastCatch.lat, longitude: lastCatch.lon,
       caught_at: new Date().toISOString(),
     })
     await supabase.rpc('increment_lure_catch_count', { lure_id_param: lastCatch.lure_id })
@@ -265,19 +243,15 @@ export default function LogCatchPage() {
   }
 
   const handleSkunkLog = async (skunkNotes: string, luresTried: string) => {
-    if (!user || !selectedSpot || !selectedWater || !gpsCoords) return
+    if (!user || !selectedSpot || !selectedWater) return
+    const lat = gpsCoords?.lat ?? selectedSpot.latitude
+    const lon = gpsCoords?.lon ?? selectedSpot.longitude
     await supabase.from('skunk_logs').insert({
-      user_id: user.id,
-      spot_id: selectedSpot.id,
-      water_id: selectedWater.id,
-      notes: skunkNotes || null,
-      lures_tried: luresTried || null,
-      temperature_f: weather?.temperature_f ?? null,
-      cloud_cover: weather?.cloud_cover ?? null,
-      wind_speed_mph: weather?.wind_speed_mph ?? null,
-      wind_direction: weather?.wind_direction ?? null,
-      barometric_pressure: weather?.barometric_pressure ?? null,
-      precipitation: weather?.precipitation ?? null,
+      user_id: user.id, spot_id: selectedSpot.id, water_id: selectedWater.id,
+      notes: skunkNotes || null, lures_tried: luresTried || null,
+      temperature_f: weather?.temperature_f ?? null, cloud_cover: weather?.cloud_cover ?? null,
+      wind_speed_mph: weather?.wind_speed_mph ?? null, wind_direction: weather?.wind_direction ?? null,
+      barometric_pressure: weather?.barometric_pressure ?? null, precipitation: weather?.precipitation ?? null,
       logged_at: new Date().toISOString(),
     })
     setShowSkunk(false)
@@ -287,28 +261,17 @@ export default function LogCatchPage() {
 
   const reset = () => {
     setStep('fish-photo')
-    setFishPhotoFile(null)
-    setFishPhotoPreview(null)
-    setSelectedLure(null)
-    setNewLureFile(null)
-    setNewLurePreview(null)
-    setNewLureName('')
-    setSpecies('')
-    setCustomSpecies('')
-    setNotes('')
-    setSizeEstimate('')
-    setLastCatch(null)
-    setPlusOneCount(0)
+    setFishPhotoFile(null); setFishPhotoPreview(null)
+    setSelectedLureId(null); setSelectedLureName('')
+    setNewLureFile(null); setNewLurePreview(null); setNewLureName('')
+    setSpecies(''); setCustomSpecies('')
+    setNotes(''); setSizeEstimate('')
+    setLastCatch(null); setPlusOneCount(0); setSaveError(null)
   }
 
-  // Skunk log modal
   if (showSkunk) {
-    return <SkunkLogForm
-      onSave={handleSkunkLog}
-      onCancel={() => setShowSkunk(false)}
-      spotName={selectedSpot?.name}
-      waterName={selectedWater?.name}
-    />
+    return <SkunkLogForm onSave={handleSkunkLog} onCancel={() => setShowSkunk(false)}
+      spotName={selectedSpot?.name} waterName={selectedWater?.name} />
   }
 
   return (
@@ -323,13 +286,28 @@ export default function LogCatchPage() {
         </div>
       )}
 
+      {/* Error banner */}
+      {saveError && (
+        <div className="bg-[var(--color-danger)]/20 border border-[var(--color-danger)] text-[var(--color-danger)] rounded-xl px-4 py-2 mb-3 text-sm">
+          {saveError}
+        </div>
+      )}
+
+      {/* Summary bar showing what's been picked so far */}
+      {step !== 'fish-photo' && step !== 'done' && step !== 'saving' && (
+        <div className="flex items-center gap-2 mb-3 text-xs text-[var(--color-text-muted)] flex-wrap">
+          {fishPhotoPreview && <span className="bg-[var(--color-bg-card)] px-2 py-1 rounded-lg">📸 Photo</span>}
+          {(selectedLureId || newLureName) && <span className="bg-[var(--color-bg-card)] px-2 py-1 rounded-lg">🎣 {selectedLureName || newLureName}</span>}
+          {species && <span className="bg-[var(--color-bg-card)] px-2 py-1 rounded-lg">🐟 {species}</span>}
+          {selectedSpot && <span className="bg-[var(--color-bg-card)] px-2 py-1 rounded-lg">📍 {selectedSpot.name}</span>}
+        </div>
+      )}
+
       {/* STEP: Fish Photo */}
       {step === 'fish-photo' && (
         <div className="flex-1 flex flex-col items-center justify-center gap-6">
-          <button
-            onClick={handleFishPhoto}
-            className="w-40 h-40 rounded-2xl bg-[var(--color-bg-card)] border-2 border-dashed border-[var(--color-border)] flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
-          >
+          <button onClick={handleFishPhoto}
+            className="w-40 h-40 rounded-2xl bg-[var(--color-bg-card)] border-2 border-dashed border-[var(--color-border)] flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform">
             <svg className="w-12 h-12 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" />
@@ -337,19 +315,11 @@ export default function LogCatchPage() {
             <span className="text-[var(--color-text)] font-medium">Snap the Fish</span>
           </button>
           <p className="text-[var(--color-text-muted)] text-sm">Take a photo of your catch</p>
-
-          {/* Skunk log option */}
-          <button
-            onClick={() => setShowSkunk(true)}
-            className="text-[var(--color-text-muted)] text-sm underline mt-4"
-          >
+          <button onClick={() => setShowSkunk(true)} className="text-[var(--color-text-muted)] text-sm underline mt-4">
             Log a skunk (no catch)
           </button>
-
           {selectedSpot && (
-            <div className="text-sm text-[var(--color-text-muted)]">
-              📍 Near: {selectedSpot.name}
-            </div>
+            <div className="text-sm text-[var(--color-text-muted)]">📍 Near: {selectedSpot.name}</div>
           )}
         </div>
       )}
@@ -363,52 +333,34 @@ export default function LogCatchPage() {
             </div>
           )}
           <h3 className="text-lg font-semibold mb-3">What'd you throw?</h3>
-
-          {/* Recent lures as visual grid */}
           {recentLures.length > 0 && (
             <div className="grid grid-cols-3 gap-2 mb-4">
               {recentLures.map(lure => (
-                <button
-                  key={lure.id}
-                  onClick={() => handleSelectLure(lure)}
-                  className="bg-[var(--color-bg-card)] rounded-xl p-2 active:scale-95 transition-transform border border-[var(--color-border)]"
-                >
-                  <img
-                    src={lure.photo_url}
-                    alt={lure.name}
-                    className="w-full h-16 object-cover rounded-lg mb-1"
-                  />
+                <button key={lure.id} onClick={() => handleSelectLure(lure)}
+                  className={`bg-[var(--color-bg-card)] rounded-xl p-2 active:scale-95 transition-transform border ${
+                    selectedLureId === lure.id ? 'border-[var(--color-accent)]' : 'border-[var(--color-border)]'
+                  }`}>
+                  <img src={lure.photo_url} alt={lure.name} className="w-full h-16 object-cover rounded-lg mb-1" />
                   <div className="text-xs text-[var(--color-text)] truncate">{lure.name}</div>
                 </button>
               ))}
             </div>
           )}
-
-          {/* New lure */}
           <div className="bg-[var(--color-bg-card)] rounded-xl p-4 border border-[var(--color-border)]">
             <h4 className="text-sm font-medium mb-2 text-[var(--color-text-muted)]">New Lure</h4>
             {newLurePreview ? (
               <img src={newLurePreview} alt="New lure" className="w-full h-24 object-cover rounded-lg mb-2" />
             ) : (
-              <button
-                onClick={handleNewLurePhoto}
-                className="w-full h-24 rounded-lg bg-[var(--color-bg-input)] border border-dashed border-[var(--color-border)] flex items-center justify-center mb-2"
-              >
+              <button onClick={handleNewLurePhoto}
+                className="w-full h-24 rounded-lg bg-[var(--color-bg-input)] border border-dashed border-[var(--color-border)] flex items-center justify-center mb-2">
                 <span className="text-[var(--color-text-muted)] text-sm">📷 Photo the lure</span>
               </button>
             )}
-            <input
-              type="text"
-              placeholder="Name it (e.g. Green Senko, Red crankbait)"
-              value={newLureName}
+            <input type="text" placeholder="Name it (e.g. Green Senko, Red crankbait)" value={newLureName}
               onChange={e => setNewLureName(e.target.value)}
-              className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-lg px-3 py-2 outline-none border border-[var(--color-border)] text-sm mb-2"
-            />
-            <button
-              onClick={handleConfirmNewLure}
-              disabled={!newLureName.trim() || !newLureFile}
-              className="w-full bg-[var(--color-accent)] text-white py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-            >
+              className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-lg px-3 py-2 outline-none border border-[var(--color-border)] text-sm mb-2" />
+            <button onClick={handleConfirmNewLure} disabled={!newLureName.trim() || !newLureFile}
+              className="w-full bg-[var(--color-accent)] text-white py-2 rounded-lg text-sm font-medium disabled:opacity-40">
               Use This Lure
             </button>
           </div>
@@ -421,34 +373,21 @@ export default function LogCatchPage() {
           <h3 className="text-lg font-semibold mb-3">What species?</h3>
           <div className="grid grid-cols-2 gap-2">
             {SPECIES.map(s => (
-              <button
-                key={s}
-                onClick={() => handleSelectSpecies(s)}
-                className={`bg-[var(--color-bg-card)] text-[var(--color-text)] rounded-xl px-4 py-3 text-sm font-medium border border-[var(--color-border)] active:scale-95 transition-transform ${
-                  species === s ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : ''
-                }`}
-              >
+              <button key={s} onClick={() => handleSelectSpecies(s)}
+                className={`bg-[var(--color-bg-card)] text-[var(--color-text)] rounded-xl px-4 py-3 text-sm font-medium border active:scale-95 transition-transform ${
+                  species === s ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)]'
+                }`}>
                 {s}
               </button>
             ))}
           </div>
           {species === 'Other' && (
             <div className="mt-3 flex gap-2">
-              <input
-                type="text"
-                placeholder="Enter species..."
-                value={customSpecies}
-                onChange={e => setCustomSpecies(e.target.value)}
-                autoFocus
-                className="flex-1 bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)]"
-              />
-              <button
-                onClick={handleConfirmCustomSpecies}
-                disabled={!customSpecies.trim()}
-                className="bg-[var(--color-accent)] text-white px-4 rounded-xl font-medium disabled:opacity-40"
-              >
-                OK
-              </button>
+              <input type="text" placeholder="Enter species..." value={customSpecies}
+                onChange={e => setCustomSpecies(e.target.value)} autoFocus
+                className="flex-1 bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)]" />
+              <button onClick={handleConfirmCustomSpecies} disabled={!customSpecies.trim()}
+                className="bg-[var(--color-accent)] text-white px-4 rounded-xl font-medium disabled:opacity-40">OK</button>
             </div>
           )}
         </div>
@@ -457,15 +396,11 @@ export default function LogCatchPage() {
       {/* STEP: Spot selection */}
       {step === 'spot' && (
         <SpotPicker
-          waters={waters}
-          spots={spots}
-          selectedSpot={selectedSpot}
-          selectedWater={selectedWater}
-          gpsCoords={gpsCoords}
-          userId={user?.id || ''}
+          waters={waters} spots={spots}
+          selectedSpot={selectedSpot} selectedWater={selectedWater}
+          gpsCoords={gpsCoords} userId={user?.id || ''}
           onSelect={(spot, water) => { setSelectedSpot(spot); setSelectedWater(water) }}
           onCreated={async () => {
-            // Reload waters and spots after inline creation
             const [wRes, sRes] = await Promise.all([
               supabase.from('waters').select('*').eq('user_id', user?.id || '').order('name'),
               supabase.from('spots').select('*').eq('user_id', user?.id || '').order('name'),
@@ -481,33 +416,17 @@ export default function LogCatchPage() {
       {step === 'notes' && (
         <div className="flex-1 flex flex-col">
           <h3 className="text-lg font-semibold mb-3">Anything else? (optional)</h3>
-          <input
-            type="text"
-            placeholder="Size estimate (e.g. 3 lbs, 14 inches)"
-            value={sizeEstimate}
+          <input type="text" placeholder="Size estimate (e.g. 3 lbs, 14 inches)" value={sizeEstimate}
             onChange={e => setSizeEstimate(e.target.value)}
-            className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] mb-3"
-          />
-          <textarea
-            placeholder="Notes (retrieve style, water clarity, anything you want to remember)"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            rows={3}
-            className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] resize-none mb-4"
-          />
+            className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] mb-3" />
+          <textarea placeholder="Notes (retrieve style, water clarity, anything to remember)" value={notes}
+            onChange={e => setNotes(e.target.value)} rows={3}
+            className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] resize-none mb-4" />
           <div className="flex gap-2 mt-auto">
-            <button
-              onClick={() => setStep('spot')}
-              className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
-            >
-              Back
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium active:scale-[0.98] transition-transform"
-            >
-              Save Catch
-            </button>
+            <button onClick={() => setStep('spot')}
+              className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Back</button>
+            <button onClick={handleSave}
+              className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium active:scale-[0.98] transition-transform">Save Catch</button>
           </div>
         </div>
       )}
@@ -528,25 +447,16 @@ export default function LogCatchPage() {
             {lastCatch ? 'Catch Logged!' : 'Skunk Logged'}
           </h3>
           {plusOneCount > 0 && (
-            <div className="text-[var(--color-accent)] font-semibold text-lg">
-              +{plusOneCount} more
-            </div>
+            <div className="text-[var(--color-accent)] font-semibold text-lg">+{plusOneCount} more</div>
           )}
-
           {lastCatch && (
-            <button
-              onClick={handlePlusOne}
-              className="w-32 h-32 rounded-full bg-[var(--color-accent)] text-white flex flex-col items-center justify-center shadow-xl active:scale-90 transition-transform"
-            >
+            <button onClick={handlePlusOne}
+              className="w-32 h-32 rounded-full bg-[var(--color-accent)] text-white flex flex-col items-center justify-center shadow-xl active:scale-90 transition-transform">
               <span className="text-4xl font-bold">+1</span>
               <span className="text-xs mt-1">Same lure & spot</span>
             </button>
           )}
-
-          <button
-            onClick={reset}
-            className="text-[var(--color-text-muted)] text-sm underline mt-4"
-          >
+          <button onClick={reset} className="text-[var(--color-text-muted)] text-sm underline mt-4">
             Log a different catch
           </button>
         </div>
@@ -555,47 +465,69 @@ export default function LogCatchPage() {
   )
 }
 
+// ============ SPOT PICKER WITH INLINE MAP ============
+
+function MapPinPicker({ center, onPinChange }: { center: [number, number]; onPinChange: (lat: number, lng: number) => void }) {
+  function DragHandler() {
+    const map = useMap()
+    useMapEvents({
+      moveend() {
+        const c = map.getCenter()
+        onPinChange(c.lat, c.lng)
+      },
+    })
+    return null
+  }
+
+  return (
+    <div className="relative rounded-xl overflow-hidden h-40 mb-3 border border-[var(--color-border)]">
+      <MapContainer center={center} zoom={16} className="h-full w-full" zoomControl={false} attributionControl={false}>
+        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
+        <DragHandler />
+      </MapContainer>
+      {/* Fixed center pin — user drags the map under it */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[500]">
+        <div className="relative -top-4">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="#e85050">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </div>
+      </div>
+      <div className="absolute bottom-1 left-0 right-0 text-center z-[500]">
+        <span className="bg-black/70 text-white text-xs px-2 py-0.5 rounded-full">
+          Drag map to position pin
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function SpotPicker({
-  waters,
-  spots,
-  selectedSpot,
-  selectedWater,
-  gpsCoords,
-  userId,
-  onSelect,
-  onCreated,
-  onContinue,
+  waters, spots, selectedSpot, selectedWater, gpsCoords, userId,
+  onSelect, onCreated, onContinue,
 }: {
-  waters: Water[]
-  spots: Spot[]
-  selectedSpot: Spot | null
-  selectedWater: Water | null
-  gpsCoords: { lat: number; lon: number } | null
-  userId: string
-  onSelect: (spot: Spot, water: Water) => void
-  onCreated: () => Promise<void>
-  onContinue: () => void
+  waters: Water[]; spots: Spot[]; selectedSpot: Spot | null; selectedWater: Water | null;
+  gpsCoords: { lat: number; lon: number } | null; userId: string;
+  onSelect: (spot: Spot, water: Water) => void; onCreated: () => Promise<void>; onContinue: () => void;
 }) {
   const [mode, setMode] = useState<'pick' | 'new-water' | 'new-spot'>('pick')
   const [newWaterName, setNewWaterName] = useState('')
   const [newSpotName, setNewSpotName] = useState('')
   const [pickWaterForSpot, setPickWaterForSpot] = useState<Water | null>(null)
   const [saving, setSaving] = useState(false)
+  const [pinLat, setPinLat] = useState(gpsCoords?.lat ?? 39.5)
+  const [pinLng, setPinLng] = useState(gpsCoords?.lon ?? -84.3)
+
+  const mapCenter: [number, number] = [gpsCoords?.lat ?? 39.5, gpsCoords?.lon ?? -84.3]
 
   const createWater = async () => {
     if (!newWaterName.trim() || !userId) return
     setSaving(true)
-    const lat = gpsCoords?.lat ?? 39.5
-    const lon = gpsCoords?.lon ?? -84.3
     const { data } = await supabase.from('waters').insert({
-      user_id: userId,
-      name: newWaterName.trim(),
-      latitude: lat,
-      longitude: lon,
+      user_id: userId, name: newWaterName.trim(), latitude: pinLat, longitude: pinLng,
     }).select().single()
     if (data) {
       await onCreated()
-      // Now go to add a spot at this water
       setPickWaterForSpot(data)
       setNewWaterName('')
       setMode('new-spot')
@@ -606,14 +538,9 @@ function SpotPicker({
   const createSpot = async () => {
     if (!newSpotName.trim() || !userId || !pickWaterForSpot) return
     setSaving(true)
-    const lat = gpsCoords?.lat ?? pickWaterForSpot.latitude
-    const lon = gpsCoords?.lon ?? pickWaterForSpot.longitude
     const { data } = await supabase.from('spots').insert({
-      user_id: userId,
-      water_id: pickWaterForSpot.id,
-      name: newSpotName.trim(),
-      latitude: lat,
-      longitude: lon,
+      user_id: userId, water_id: pickWaterForSpot.id, name: newSpotName.trim(),
+      latitude: pinLat, longitude: pinLng,
     }).select().single()
     if (data) {
       await onCreated()
@@ -628,30 +555,17 @@ function SpotPicker({
     return (
       <div className="flex-1 flex flex-col">
         <h3 className="text-lg font-semibold mb-1">New Water</h3>
-        <p className="text-sm text-[var(--color-text-muted)] mb-3">
-          Name this body of water. Your GPS position will be used for the pin.
-        </p>
-        <input
-          type="text"
-          placeholder="e.g. Caesar Creek, Steve's Work Pond"
-          value={newWaterName}
-          onChange={e => setNewWaterName(e.target.value)}
-          autoFocus
-          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3"
-        />
+        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map to place the pin on the water.</p>
+        <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} />
+        <input type="text" placeholder="Name this water (e.g. Caesar Creek)" value={newWaterName}
+          onChange={e => setNewWaterName(e.target.value)} autoFocus
+          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
-          <button
-            onClick={() => setMode('pick')}
-            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createWater}
-            disabled={!newWaterName.trim() || saving}
-            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40"
-          >
-            {saving ? 'Creating...' : 'Create & Add Spot'}
+          <button onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={createWater} disabled={!newWaterName.trim() || saving}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40">
+            {saving ? 'Creating...' : 'Next: Add Spot'}
           </button>
         </div>
       </div>
@@ -662,32 +576,19 @@ function SpotPicker({
     return (
       <div className="flex-1 flex flex-col">
         <h3 className="text-lg font-semibold mb-1">New Spot</h3>
-        <p className="text-sm text-[var(--color-text-muted)] mb-1">
+        <p className="text-sm text-[var(--color-text-muted)] mb-0.5">
           at <span className="text-[var(--color-text)] font-medium">{pickWaterForSpot?.name}</span>
         </p>
-        <p className="text-sm text-[var(--color-text-muted)] mb-3">
-          Name this specific bank position. GPS will pin it.
-        </p>
-        <input
-          type="text"
-          placeholder="e.g. Spillway, Dock Corner, Fallen Tree"
-          value={newSpotName}
-          onChange={e => setNewSpotName(e.target.value)}
-          autoFocus
-          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3"
-        />
+        <p className="text-sm text-[var(--color-text-muted)] mb-2">Drag the map to pin your exact bank position.</p>
+        <MapPinPicker center={mapCenter} onPinChange={(lat, lng) => { setPinLat(lat); setPinLng(lng) }} />
+        <input type="text" placeholder="Name this spot (e.g. Spillway, Fallen Tree)" value={newSpotName}
+          onChange={e => setNewSpotName(e.target.value)} autoFocus
+          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3" />
         <div className="flex gap-2 mt-auto">
-          <button
-            onClick={() => setMode('pick')}
-            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createSpot}
-            disabled={!newSpotName.trim() || saving}
-            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40"
-          >
+          <button onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+          <button onClick={createSpot} disabled={!newSpotName.trim() || saving}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40">
             {saving ? 'Creating...' : 'Create Spot'}
           </button>
         </div>
@@ -695,11 +596,9 @@ function SpotPicker({
     )
   }
 
-  // Pick mode — list existing + create new buttons
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <h3 className="text-lg font-semibold mb-2">Where?</h3>
-
       {selectedSpot && (
         <div className="bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-xl p-3 mb-3">
           <div className="text-sm text-[var(--color-accent)] font-medium">
@@ -709,36 +608,23 @@ function SpotPicker({
           {selectedWater && <div className="text-xs text-[var(--color-text-muted)]">{selectedWater.name}</div>}
         </div>
       )}
-
-      {/* Quick-create buttons */}
       <div className="flex gap-2 mb-3">
-        <button
-          onClick={() => setMode('new-water')}
-          className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]"
-        >
+        <button onClick={() => { setPinLat(mapCenter[0]); setPinLng(mapCenter[1]); setMode('new-water') }}
+          className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]">
           + New Water
         </button>
         {waters.length > 0 && (
-          <button
-            onClick={() => {
-              // If there's only one water, skip the pick and go straight to spot creation
-              if (waters.length === 1) {
-                setPickWaterForSpot(waters[0])
-                setMode('new-spot')
-              } else {
-                // Show water picker inline — for now use first water or selectedWater
-                setPickWaterForSpot(selectedWater || waters[0])
-                setMode('new-spot')
-              }
-            }}
-            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]"
-          >
+          <button onClick={() => {
+            const w = selectedWater || waters[0]
+            setPickWaterForSpot(w)
+            setPinLat(mapCenter[0]); setPinLng(mapCenter[1])
+            setMode('new-spot')
+          }}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]">
             + New Spot
           </button>
         )}
       </div>
-
-      {/* Existing spots list */}
       <div className="flex-1 overflow-y-auto -mx-4 px-4 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
         {waters.map(w => {
           const waterSpots = spots.filter(s => s.water_id === w.id)
@@ -747,16 +633,13 @@ function SpotPicker({
             <div key={w.id} className="mb-3">
               <div className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1.5">{w.name}</div>
               {waterSpots.map(s => (
-                <button
-                  key={s.id}
-                  type="button"
+                <button key={s.id} type="button"
                   onPointerDown={() => onSelect(s, w)}
                   className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium mb-1.5 border transition-colors ${
                     selectedSpot?.id === s.id
                       ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-[var(--color-accent)]'
                       : 'text-[var(--color-text)] bg-[var(--color-bg-card)] border-[var(--color-border)] active:bg-[var(--color-bg-input)]'
-                  }`}
-                >
+                  }`}>
                   📍 {s.name}
                 </button>
               ))}
@@ -767,33 +650,26 @@ function SpotPicker({
           <div className="text-center py-6">
             <div className="text-3xl mb-2">📍</div>
             <p className="text-sm text-[var(--color-text-muted)]">
-              No spots yet. Tap <span className="text-[var(--color-accent)] font-medium">+ New Water</span> to create your first one.
+              No spots yet. Tap <span className="text-[var(--color-accent)] font-medium">+ New Water</span> to get started.
             </p>
           </div>
         )}
       </div>
-
-      <button
-        onClick={onContinue}
-        disabled={!selectedSpot}
-        className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-3 disabled:opacity-40 active:scale-[0.98] transition-transform shrink-0"
-      >
+      <button onClick={onContinue} disabled={!selectedSpot}
+        className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-3 disabled:opacity-40 active:scale-[0.98] transition-transform shrink-0">
         Continue
       </button>
     </div>
   )
 }
 
+// ============ SKUNK LOG ============
+
 function SkunkLogForm({
-  onSave,
-  onCancel,
-  spotName,
-  waterName,
+  onSave, onCancel, spotName, waterName,
 }: {
-  onSave: (notes: string, luresTried: string) => void
-  onCancel: () => void
-  spotName?: string
-  waterName?: string
+  onSave: (notes: string, luresTried: string) => void; onCancel: () => void;
+  spotName?: string; waterName?: string;
 }) {
   const [notes, setNotes] = useState('')
   const [luresTried, setLuresTried] = useState('')
@@ -804,33 +680,17 @@ function SkunkLogForm({
       <p className="text-sm text-[var(--color-text-muted)] mb-4">
         No catch today{spotName ? ` at ${spotName}` : ''}{waterName ? ` (${waterName})` : ''} — log what you tried.
       </p>
-      <input
-        type="text"
-        placeholder="What did you throw? (e.g. Senko, crankbait, jig)"
-        value={luresTried}
+      <input type="text" placeholder="What did you throw? (e.g. Senko, crankbait, jig)" value={luresTried}
         onChange={e => setLuresTried(e.target.value)}
-        className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] mb-3"
-      />
-      <textarea
-        placeholder="Notes (water clarity, conditions, anything you noticed)"
-        value={notes}
-        onChange={e => setNotes(e.target.value)}
-        rows={4}
-        className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] resize-none mb-4"
-      />
+        className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] mb-3" />
+      <textarea placeholder="Notes (water clarity, conditions, anything you noticed)" value={notes}
+        onChange={e => setNotes(e.target.value)} rows={4}
+        className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] resize-none mb-4" />
       <div className="flex gap-2 mt-auto">
-        <button
-          onClick={onCancel}
-          className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => onSave(notes, luresTried)}
-          className="flex-1 bg-[var(--color-warning)] text-gray-900 py-3 rounded-xl font-medium active:scale-[0.98] transition-transform"
-        >
-          Log Skunk
-        </button>
+        <button onClick={onCancel}
+          className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]">Cancel</button>
+        <button onClick={() => onSave(notes, luresTried)}
+          className="flex-1 bg-[var(--color-warning)] text-gray-900 py-3 rounded-xl font-medium active:scale-[0.98] transition-transform">Log Skunk</button>
       </div>
     </div>
   )
