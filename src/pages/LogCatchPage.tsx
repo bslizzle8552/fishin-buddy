@@ -652,7 +652,7 @@ function SpotPicker({
         </div>
       )}
       <div className="flex gap-2 mb-3">
-        <button onClick={() => { setPinLat(mapCenter[0]); setPinLng(mapCenter[1]); setMode('new-water') }}
+        <button onClick={() => { setPinLat(mapCenter[0]); setPinLng(mapCenter[1]); setMode('water-pin') }}
           className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]">
           + New Water
         </button>
@@ -661,7 +661,7 @@ function SpotPicker({
             const w = selectedWater || waters[0]
             setPickWaterForSpot(w)
             setPinLat(mapCenter[0]); setPinLng(mapCenter[1])
-            setMode('new-spot')
+            setMode('spot-pin')
           }}
             className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]">
             + New Spot
