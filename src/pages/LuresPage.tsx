@@ -1,12 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import type { Lure } from '../types/database'
 
 export default function LuresPage() {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const [lures, setLures] = useState<Lure[]>([])
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<Lure | null>(null)
