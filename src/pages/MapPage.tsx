@@ -58,37 +58,22 @@ function MapCenterTracker({ onCenterChange }: { onCenterChange: (lat: number, ln
   return null
 }
 
-// Locate-me button rendered as a Leaflet control (so it sits inside the map and above tiles)
+// Locate-me button as a Leaflet control
 function LocateMeControl({ onLocate }: { onLocate: () => void }) {
   const map = useMap()
   useEffect(() => {
-    const container = L.DomUtil.create('div', '')
-    container.innerHTML = `
-      <button style="
-        width: 44px; height: 44px; border-radius: 12px;
-        background: #242938; border: 1px solid #3a3f52;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      ">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4a9e6e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"/>
-          <circle cx="12" cy="12" r="3"/>
-          <line x1="12" y1="3" x2="12" y2="5"/>
-          <line x1="12" y1="19" x2="12" y2="21"/>
-          <line x1="3" y1="12" x2="5" y2="12"/>
-          <line x1="19" y1="12" x2="21" y2="12"/>
-        </svg>
-      </button>
-    `
-    const control = L.Control.extend({
+    const LocateControl = L.Control.extend({
       options: { position: 'bottomright' as const },
       onAdd() {
-        L.DomEvent.disableClickPropagation(container)
-        container.querySelector('button')!.addEventListener('click', onLocate)
-        return container
+        const btn = L.DomUtil.create('button', '')
+        btn.style.cssText = 'width:44px;height:44px;border-radius:12px;background:#242938;border:1px solid #3a3f52;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);padding:0;line-height:0;'
+        btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4a9e6e" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="3" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="21"/><line x1="3" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="21" y2="12"/></svg>'
+        L.DomEvent.disableClickPropagation(btn)
+        btn.addEventListener('click', onLocate)
+        return btn
       },
     })
-    const ctrl = new control()
+    const ctrl = new LocateControl()
     ctrl.addTo(map)
     return () => { ctrl.remove() }
   }, [map, onLocate])
@@ -478,16 +463,18 @@ export default function MapPage() {
 
       </div>
 
-      {/* Add Water Modal */}
+      {/* Add Water — Step 1: pin is on map already, just need name */}
       {showAddWater && (
         <Modal onClose={() => { setShowAddWater(false); setPlacingPin(null); setPinnedLocation(null) }}>
-          <h3 className="text-lg font-semibold mb-2">New Water</h3>
-          <p className="text-sm text-[var(--color-text-muted)] mb-3">
-            Tap the map to place the pin exactly, or it will drop at the center of the map.
+          <h3 className="text-lg font-semibold mb-2">Name This Water</h3>
+          <p className="text-sm text-[var(--color-text-muted)] mb-1">
+            {pinnedLocation
+              ? 'Pin placed! Now give it a name.'
+              : 'Tap the map behind this panel to place the pin, or it drops at map center.'}
           </p>
           {pinnedLocation && (
             <div className="text-xs text-[var(--color-accent)] mb-2">
-              Pin placed at {pinnedLocation.lat.toFixed(5)}, {pinnedLocation.lng.toFixed(5)}
+              📍 {pinnedLocation.lat.toFixed(5)}, {pinnedLocation.lng.toFixed(5)}
             </div>
           )}
           <input
@@ -495,7 +482,6 @@ export default function MapPage() {
             placeholder="e.g. Caesar Creek, Steve's Work Pond"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            autoFocus
             className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-4"
           />
           <button
@@ -508,16 +494,18 @@ export default function MapPage() {
         </Modal>
       )}
 
-      {/* Add Spot Modal */}
+      {/* Add Spot — Step 1: pin is on map already, just need name */}
       {showAddSpot && (
         <Modal onClose={() => { setShowAddSpot(false); setPlacingPin(null); setPinnedLocation(null) }}>
-          <h3 className="text-lg font-semibold mb-2">New Spot at {selectedWater?.name}</h3>
-          <p className="text-sm text-[var(--color-text-muted)] mb-3">
-            Tap the map to place the pin, or it'll drop at map center.
+          <h3 className="text-lg font-semibold mb-2">Name This Spot</h3>
+          <p className="text-sm text-[var(--color-text-muted)] mb-1">
+            at {selectedWater?.name} — {pinnedLocation
+              ? 'Pin placed! Now give it a name.'
+              : 'Tap the map to place the pin first, or it drops at map center.'}
           </p>
           {pinnedLocation && (
             <div className="text-xs text-[var(--color-accent)] mb-2">
-              Pin placed at {pinnedLocation.lat.toFixed(5)}, {pinnedLocation.lng.toFixed(5)}
+              📍 {pinnedLocation.lat.toFixed(5)}, {pinnedLocation.lng.toFixed(5)}
             </div>
           )}
           <input
@@ -525,7 +513,6 @@ export default function MapPage() {
             placeholder="e.g. Spillway, Dock Corner, Fallen Tree"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            autoFocus
             className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-4"
           />
           <button
