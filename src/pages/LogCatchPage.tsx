@@ -456,58 +456,25 @@ export default function LogCatchPage() {
 
       {/* STEP: Spot selection */}
       {step === 'spot' && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <h3 className="text-lg font-semibold mb-3">Where?</h3>
-          {selectedSpot && (
-            <div
-              className="bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-xl p-3 mb-3"
-            >
-              <div className="text-sm text-[var(--color-accent)] font-medium">
-                {gpsCoords ? 'Auto-matched nearby' : 'Selected'}
-              </div>
-              <div className="text-[var(--color-text)] font-semibold">{selectedSpot.name}</div>
-              {selectedWater && <div className="text-xs text-[var(--color-text-muted)]">{selectedWater.name}</div>}
-            </div>
-          )}
-
-          {/* List all waters/spots for manual selection */}
-          <div className="flex-1 overflow-y-auto -mx-4 px-4 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-            {waters.map(w => {
-              const waterSpots = spots.filter(s => s.water_id === w.id)
-              if (waterSpots.length === 0) return null
-              return (
-                <div key={w.id} className="mb-3">
-                  <div className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1.5">{w.name}</div>
-                  {waterSpots.map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onPointerDown={() => { setSelectedSpot(s); setSelectedWater(w) }}
-                      className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium mb-1.5 border transition-colors ${
-                        selectedSpot?.id === s.id
-                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-[var(--color-accent)]'
-                          : 'text-[var(--color-text)] bg-[var(--color-bg-card)] border-[var(--color-border)] active:bg-[var(--color-bg-input)]'
-                      }`}
-                    >
-                      📍 {s.name}
-                    </button>
-                  ))}
-                </div>
-              )
-            })}
-            {waters.length === 0 && (
-              <p className="text-sm text-[var(--color-text-muted)]">No waters or spots yet. Create some on the Map tab first.</p>
-            )}
-          </div>
-
-          <button
-            onClick={() => setStep('notes')}
-            disabled={!selectedSpot}
-            className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-3 disabled:opacity-40 active:scale-[0.98] transition-transform shrink-0"
-          >
-            Continue
-          </button>
-        </div>
+        <SpotPicker
+          waters={waters}
+          spots={spots}
+          selectedSpot={selectedSpot}
+          selectedWater={selectedWater}
+          gpsCoords={gpsCoords}
+          userId={user?.id || ''}
+          onSelect={(spot, water) => { setSelectedSpot(spot); setSelectedWater(water) }}
+          onCreated={async () => {
+            // Reload waters and spots after inline creation
+            const [wRes, sRes] = await Promise.all([
+              supabase.from('waters').select('*').eq('user_id', user?.id || '').order('name'),
+              supabase.from('spots').select('*').eq('user_id', user?.id || '').order('name'),
+            ])
+            if (wRes.data) setWaters(wRes.data)
+            if (sRes.data) setSpots(sRes.data)
+          }}
+          onContinue={() => setStep('notes')}
+        />
       )}
 
       {/* STEP: Notes (optional) */}
@@ -584,6 +551,235 @@ export default function LogCatchPage() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function SpotPicker({
+  waters,
+  spots,
+  selectedSpot,
+  selectedWater,
+  gpsCoords,
+  userId,
+  onSelect,
+  onCreated,
+  onContinue,
+}: {
+  waters: Water[]
+  spots: Spot[]
+  selectedSpot: Spot | null
+  selectedWater: Water | null
+  gpsCoords: { lat: number; lon: number } | null
+  userId: string
+  onSelect: (spot: Spot, water: Water) => void
+  onCreated: () => Promise<void>
+  onContinue: () => void
+}) {
+  const [mode, setMode] = useState<'pick' | 'new-water' | 'new-spot'>('pick')
+  const [newWaterName, setNewWaterName] = useState('')
+  const [newSpotName, setNewSpotName] = useState('')
+  const [pickWaterForSpot, setPickWaterForSpot] = useState<Water | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const createWater = async () => {
+    if (!newWaterName.trim() || !userId) return
+    setSaving(true)
+    const lat = gpsCoords?.lat ?? 39.5
+    const lon = gpsCoords?.lon ?? -84.3
+    const { data } = await supabase.from('waters').insert({
+      user_id: userId,
+      name: newWaterName.trim(),
+      latitude: lat,
+      longitude: lon,
+    }).select().single()
+    if (data) {
+      await onCreated()
+      // Now go to add a spot at this water
+      setPickWaterForSpot(data)
+      setNewWaterName('')
+      setMode('new-spot')
+    }
+    setSaving(false)
+  }
+
+  const createSpot = async () => {
+    if (!newSpotName.trim() || !userId || !pickWaterForSpot) return
+    setSaving(true)
+    const lat = gpsCoords?.lat ?? pickWaterForSpot.latitude
+    const lon = gpsCoords?.lon ?? pickWaterForSpot.longitude
+    const { data } = await supabase.from('spots').insert({
+      user_id: userId,
+      water_id: pickWaterForSpot.id,
+      name: newSpotName.trim(),
+      latitude: lat,
+      longitude: lon,
+    }).select().single()
+    if (data) {
+      await onCreated()
+      onSelect(data, pickWaterForSpot)
+      setNewSpotName('')
+      setMode('pick')
+    }
+    setSaving(false)
+  }
+
+  if (mode === 'new-water') {
+    return (
+      <div className="flex-1 flex flex-col">
+        <h3 className="text-lg font-semibold mb-1">New Water</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-3">
+          Name this body of water. Your GPS position will be used for the pin.
+        </p>
+        <input
+          type="text"
+          placeholder="e.g. Caesar Creek, Steve's Work Pond"
+          value={newWaterName}
+          onChange={e => setNewWaterName(e.target.value)}
+          autoFocus
+          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3"
+        />
+        <div className="flex gap-2 mt-auto">
+          <button
+            onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={createWater}
+            disabled={!newWaterName.trim() || saving}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40"
+          >
+            {saving ? 'Creating...' : 'Create & Add Spot'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (mode === 'new-spot') {
+    return (
+      <div className="flex-1 flex flex-col">
+        <h3 className="text-lg font-semibold mb-1">New Spot</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-1">
+          at <span className="text-[var(--color-text)] font-medium">{pickWaterForSpot?.name}</span>
+        </p>
+        <p className="text-sm text-[var(--color-text-muted)] mb-3">
+          Name this specific bank position. GPS will pin it.
+        </p>
+        <input
+          type="text"
+          placeholder="e.g. Spillway, Dock Corner, Fallen Tree"
+          value={newSpotName}
+          onChange={e => setNewSpotName(e.target.value)}
+          autoFocus
+          className="w-full bg-[var(--color-bg-input)] text-[var(--color-text)] rounded-xl px-4 py-3 outline-none border border-[var(--color-border)] focus:border-[var(--color-accent)] mb-3"
+        />
+        <div className="flex gap-2 mt-auto">
+          <button
+            onClick={() => setMode('pick')}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={createSpot}
+            disabled={!newSpotName.trim() || saving}
+            className="flex-1 bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium disabled:opacity-40"
+          >
+            {saving ? 'Creating...' : 'Create Spot'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Pick mode — list existing + create new buttons
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <h3 className="text-lg font-semibold mb-2">Where?</h3>
+
+      {selectedSpot && (
+        <div className="bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-xl p-3 mb-3">
+          <div className="text-sm text-[var(--color-accent)] font-medium">
+            {gpsCoords ? 'Auto-matched nearby' : 'Selected'}
+          </div>
+          <div className="text-[var(--color-text)] font-semibold">{selectedSpot.name}</div>
+          {selectedWater && <div className="text-xs text-[var(--color-text-muted)]">{selectedWater.name}</div>}
+        </div>
+      )}
+
+      {/* Quick-create buttons */}
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => setMode('new-water')}
+          className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]"
+        >
+          + New Water
+        </button>
+        {waters.length > 0 && (
+          <button
+            onClick={() => {
+              // If there's only one water, skip the pick and go straight to spot creation
+              if (waters.length === 1) {
+                setPickWaterForSpot(waters[0])
+                setMode('new-spot')
+              } else {
+                // Show water picker inline — for now use first water or selectedWater
+                setPickWaterForSpot(selectedWater || waters[0])
+                setMode('new-spot')
+              }
+            }}
+            className="flex-1 bg-[var(--color-bg-card)] text-[var(--color-accent)] py-2.5 rounded-xl text-sm font-medium border border-[var(--color-border)] active:scale-[0.98]"
+          >
+            + New Spot
+          </button>
+        )}
+      </div>
+
+      {/* Existing spots list */}
+      <div className="flex-1 overflow-y-auto -mx-4 px-4 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {waters.map(w => {
+          const waterSpots = spots.filter(s => s.water_id === w.id)
+          if (waterSpots.length === 0) return null
+          return (
+            <div key={w.id} className="mb-3">
+              <div className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1.5">{w.name}</div>
+              {waterSpots.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onPointerDown={() => onSelect(s, w)}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium mb-1.5 border transition-colors ${
+                    selectedSpot?.id === s.id
+                      ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-[var(--color-accent)]'
+                      : 'text-[var(--color-text)] bg-[var(--color-bg-card)] border-[var(--color-border)] active:bg-[var(--color-bg-input)]'
+                  }`}
+                >
+                  📍 {s.name}
+                </button>
+              ))}
+            </div>
+          )
+        })}
+        {spots.length === 0 && (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-2">📍</div>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              No spots yet. Tap <span className="text-[var(--color-accent)] font-medium">+ New Water</span> to create your first one.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={onContinue}
+        disabled={!selectedSpot}
+        className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-3 disabled:opacity-40 active:scale-[0.98] transition-transform shrink-0"
+      >
+        Continue
+      </button>
     </div>
   )
 }

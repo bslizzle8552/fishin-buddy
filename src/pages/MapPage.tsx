@@ -58,6 +58,43 @@ function MapCenterTracker({ onCenterChange }: { onCenterChange: (lat: number, ln
   return null
 }
 
+// Locate-me button rendered as a Leaflet control (so it sits inside the map and above tiles)
+function LocateMeControl({ onLocate }: { onLocate: () => void }) {
+  const map = useMap()
+  useEffect(() => {
+    const container = L.DomUtil.create('div', '')
+    container.innerHTML = `
+      <button style="
+        width: 44px; height: 44px; border-radius: 12px;
+        background: #242938; border: 1px solid #3a3f52;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      ">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4a9e6e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="3"/>
+          <line x1="12" y1="3" x2="12" y2="5"/>
+          <line x1="12" y1="19" x2="12" y2="21"/>
+          <line x1="3" y1="12" x2="5" y2="12"/>
+          <line x1="19" y1="12" x2="21" y2="12"/>
+        </svg>
+      </button>
+    `
+    const control = L.Control.extend({
+      options: { position: 'bottomright' as const },
+      onAdd() {
+        L.DomEvent.disableClickPropagation(container)
+        container.querySelector('button')!.addEventListener('click', onLocate)
+        return container
+      },
+    })
+    const ctrl = new control()
+    ctrl.addTo(map)
+    return () => { ctrl.remove() }
+  }, [map, onLocate])
+  return null
+}
+
 export default function MapPage() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
@@ -369,6 +406,7 @@ export default function MapPage() {
           />
           <RecenterMap lat={center[0]} lng={center[1]} zoom={zoom} />
           <MapCenterTracker onCenterChange={(lat, lng) => setMapCenter({ lat, lng })} />
+          <LocateMeControl onLocate={locateMe} />
 
           {/* Tap-to-place handler when in pin placement mode */}
           {placingPin && <MapClickHandler onMapClick={handleMapClick} />}
@@ -439,20 +477,6 @@ export default function MapPage() {
         )}
 
       </div>
-
-      {/* Locate me button — outside the map container so Leaflet can't cover it */}
-      <button
-        onClick={locateMe}
-        className="fixed bottom-20 right-4 z-[1000] w-12 h-12 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-        style={{ maxWidth: '430px' }}
-        title="Center on my location"
-      >
-        <svg className="w-6 h-6 text-[var(--color-accent)]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2M3 12h2m14 0h2" />
-        </svg>
-      </button>
 
       {/* Add Water Modal */}
       {showAddWater && (
