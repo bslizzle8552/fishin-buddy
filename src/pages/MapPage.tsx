@@ -174,20 +174,23 @@ export default function MapPage() {
   const startAddWater = () => {
     setPlacingPin('water')
     setPinnedLocation(null)
-    setShowAddWater(true)
+    setShowAddWater(false)  // DON'T show modal yet — wait for pin placement
     setNewName('')
   }
 
   const startAddSpot = () => {
     setPlacingPin('spot')
     setPinnedLocation(null)
-    setShowAddSpot(true)
+    setShowAddSpot(false)  // DON'T show modal yet — wait for pin placement
     setNewName('')
   }
 
   const handleMapClick = (lat: number, lng: number) => {
     if (placingPin) {
       setPinnedLocation({ lat, lng })
+      // NOW show the naming modal — pin is placed, user can see it
+      if (placingPin === 'water') setShowAddWater(true)
+      if (placingPin === 'spot') setShowAddSpot(true)
     }
   }
 
@@ -370,9 +373,13 @@ export default function MapPage() {
       </div>
 
       {/* Pin placement instruction banner */}
-      {placingPin && (
-        <div className="bg-[var(--color-accent)] text-white text-center py-2 text-sm font-medium z-[999]">
-          Tap the map to place the pin, or it'll drop at map center
+      {placingPin && !showAddWater && !showAddSpot && (
+        <div className="bg-[var(--color-accent)] text-white text-center py-3 text-sm font-medium z-[999]">
+          👆 Tap the map where you want to drop the pin
+          <div className="mt-1">
+            <button onClick={() => { setPlacingPin(null); setPinnedLocation(null) }}
+              className="text-white/80 text-xs underline">Cancel</button>
+          </div>
         </div>
       )}
 
