@@ -49,41 +49,40 @@ export default function LogCatchPage() {
 
   const loadData = useCallback(async () => {
     if (!user) return
-    const [lureRes, waterRes] = await Promise.all([
+    const [lureRes, waterRes, spotRes] = await Promise.all([
       supabase.from('lures').select('*').eq('user_id', user.id).order('catch_count', { ascending: false }).limit(20),
       supabase.from('waters').select('*').eq('user_id', user.id).order('name'),
+      supabase.from('spots').select('*').eq('user_id', user.id).order('name'),
     ])
     if (lureRes.data) setRecentLures(lureRes.data)
     if (waterRes.data) setWaters(waterRes.data)
+    if (spotRes.data) setSpots(spotRes.data)
+    return { waters: waterRes.data, spots: spotRes.data }
   }, [user])
 
   useEffect(() => {
-    loadData()
-    // Get GPS and weather right away
-    getCurrentPosition()
-      .then(async pos => {
+    loadData().then(async (result) => {
+      // Get GPS and weather
+      try {
+        const pos = await getCurrentPosition()
         const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude }
         setGpsCoords(coords)
         // Auto-match nearest spot
-        const allSpots = await supabase
-          .from('spots')
-          .select('*')
-          .eq('user_id', user?.id || '')
-        if (allSpots.data) {
-          setSpots(allSpots.data)
-          const nearest = findNearestSpot(coords.lat, coords.lon, allSpots.data)
+        if (result?.spots) {
+          const nearest = findNearestSpot(coords.lat, coords.lon, result.spots)
           if (nearest) {
             setSelectedSpot(nearest)
-            // Also set the water
-            const water = waters.find(w => w.id === nearest.water_id)
+            const water = result.waters?.find((w: any) => w.id === nearest.water_id)
             if (water) setSelectedWater(water)
           }
         }
         // Fetch weather
         const w = await fetchWeather(coords.lat, coords.lon)
         setWeather(w)
-      })
-      .catch(() => {})
+      } catch {
+        // GPS not available — weather and auto-match won't work
+      }
+    })
   }, [user, loadData])
 
   // When waters load and we have a matched spot, set the water
@@ -294,7 +293,7 @@ export default function LogCatchPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-bg)] px-4 pt-4 pb-4 overflow-y-auto">
+    <div className="flex flex-col h-full bg-[var(--color-bg)] px-4 pb-4 overflow-y-auto" style={{ paddingTop: 'max(16px, env(safe-area-inset-top, 16px))' }}>
       {/* Weather bar */}
       {weather && weather.temperature_f && (
         <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)] mb-4 bg-[var(--color-bg-card)] rounded-xl px-3 py-2">
@@ -438,42 +437,54 @@ export default function LogCatchPage() {
 
       {/* STEP: Spot selection */}
       {step === 'spot' && (
-        <div className="flex-1">
+        <div className="flex-1 flex flex-col min-h-0">
           <h3 className="text-lg font-semibold mb-3">Where?</h3>
           {selectedSpot && (
-            <div className="bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-xl p-3 mb-3">
-              <div className="text-sm text-[var(--color-accent)] font-medium">Auto-matched</div>
+            <div
+              className="bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-xl p-3 mb-3"
+            >
+              <div className="text-sm text-[var(--color-accent)] font-medium">
+                {gpsCoords ? 'Auto-matched nearby' : 'Selected'}
+              </div>
               <div className="text-[var(--color-text)] font-semibold">{selectedSpot.name}</div>
               {selectedWater && <div className="text-xs text-[var(--color-text-muted)]">{selectedWater.name}</div>}
             </div>
           )}
 
           {/* List all waters/spots for manual selection */}
-          <div className="space-y-2 max-h-60 overflow-y-auto">
-            {waters.map(w => (
-              <div key={w.id}>
-                <div className="text-sm font-medium text-[var(--color-text-muted)] px-1 mb-1">{w.name}</div>
-                {spots.filter(s => s.water_id === w.id).map(s => (
-                  <button
-                    key={s.id}
-                    onClick={() => { setSelectedSpot(s); setSelectedWater(w) }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
-                      selectedSpot?.id === s.id
-                        ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                        : 'text-[var(--color-text)] bg-[var(--color-bg-card)]'
-                    } mb-1`}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            ))}
+          <div className="flex-1 overflow-y-auto -mx-4 px-4 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+            {waters.map(w => {
+              const waterSpots = spots.filter(s => s.water_id === w.id)
+              if (waterSpots.length === 0) return null
+              return (
+                <div key={w.id} className="mb-3">
+                  <div className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1.5">{w.name}</div>
+                  {waterSpots.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onPointerDown={() => { setSelectedSpot(s); setSelectedWater(w) }}
+                      className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium mb-1.5 border transition-colors ${
+                        selectedSpot?.id === s.id
+                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-[var(--color-accent)]'
+                          : 'text-[var(--color-text)] bg-[var(--color-bg-card)] border-[var(--color-border)] active:bg-[var(--color-bg-input)]'
+                      }`}
+                    >
+                      📍 {s.name}
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+            {waters.length === 0 && (
+              <p className="text-sm text-[var(--color-text-muted)]">No waters or spots yet. Create some on the Map tab first.</p>
+            )}
           </div>
 
           <button
             onClick={() => setStep('notes')}
             disabled={!selectedSpot}
-            className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-4 disabled:opacity-40 active:scale-[0.98] transition-transform"
+            className="w-full bg-[var(--color-accent)] text-white py-3 rounded-xl font-medium mt-3 disabled:opacity-40 active:scale-[0.98] transition-transform shrink-0"
           >
             Continue
           </button>

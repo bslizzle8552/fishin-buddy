@@ -35,6 +35,7 @@ export default function SpotDetailPage() {
   const [catches, setCatches] = useState<CatchWithLure[]>([])
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const loadSpotData = useCallback(async () => {
     if (!user || !spotId) return
@@ -109,22 +110,65 @@ export default function SpotDetailPage() {
   return (
     <div className="h-full overflow-y-auto pb-4">
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 bg-[var(--color-bg)]">
-        <button
-          onClick={() => navigate(-1)}
-          className="text-[var(--color-accent)] text-sm mb-2 flex items-center gap-1"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-          </svg>
-          Back
-        </button>
+      <div className="px-4 pb-3 bg-[var(--color-bg)]" style={{ paddingTop: 'max(16px, env(safe-area-inset-top, 16px))' }}>
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-[var(--color-accent)] text-sm flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+            Back
+          </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="text-[var(--color-danger)] text-sm flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+            </svg>
+            Delete
+          </button>
+        </div>
         <h1 className="text-2xl font-bold text-[var(--color-text)]">{spot.name}</h1>
         {water && <div className="text-sm text-[var(--color-text-muted)]">{water.name}</div>}
         <div className="text-xs text-[var(--color-text-muted)] mt-1">
           {catches.length} catches logged
         </div>
       </div>
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(false)} />
+          <div className="relative bg-[var(--color-bg-card)] rounded-t-2xl p-5 w-full max-w-[430px]">
+            <h3 className="text-lg font-semibold mb-2 text-[var(--color-danger)]">Delete Spot?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              Delete "{spot.name}" and all its catch history? This can't be undone.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 bg-[var(--color-bg-input)] text-[var(--color-text)] py-3 rounded-xl font-medium border border-[var(--color-border)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  await supabase.from('catches').delete().eq('spot_id', spot.id)
+                  await supabase.from('skunk_logs').delete().eq('spot_id', spot.id)
+                  await supabase.from('spots').delete().eq('id', spot.id)
+                  navigate('/map')
+                }}
+                className="flex-1 bg-[var(--color-danger)] text-white py-3 rounded-xl font-medium"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Current weather */}
       {weather && weather.temperature_f && (
